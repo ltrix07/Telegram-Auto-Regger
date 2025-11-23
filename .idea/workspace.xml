@@ -1,11 +1,59 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
   <component name="ChangeListManager">
-    <list default="true" id="e5a9cf23-2302-46cf-9211-2899bd6c606e" name="Changes" comment="" />
+    <list default="true" id="e5a9cf23-2302-46cf-9211-2899bd6c606e" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/Telegrm-Auto-Regger.iml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/Project_Default.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/auto_reger/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/auto_reger/adb.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/auto_reger/emulator.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/auto_reger/sessions.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/auto_reger/sms_api.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/auto_reger/tdesktop.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/auto_reger/utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/auto_reger/windows_automation.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/examples/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/market_tools/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/market_tools/analytics/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/market_tools/analytics/competitor_analyze.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/market_tools/analytics/providers_statistics.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/market_tools/analytics/sold_statistics.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/market_tools/market.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/market_tools/utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/market_tools/warmup.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/market_auto_bump.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/market_auto_upload.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/market_items_checker.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/market_reposter.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/register_telegram_accounts.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/telegram_regger.py" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
   <component name="ProjectColorInfo"><![CDATA[{
   "associatedIndex": 0
@@ -15,6 +63,48 @@
   <component name="ProjectViewState">
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Python.telegram_regger.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "git-widget-placeholder": "master",
+    "last_opened_file_path": "C:/Users/Владимир/PycharmProjects/Telegrm-Auto-Regger"
+  }
+}]]></component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="C:\Users\Владимир\PycharmProjects\Telegrm-Auto-Regger" />
+    </key>
+  </component>
+  <component name="RunManager">
+    <configuration name="telegram_regger" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="Telegrm-Auto-Regger" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/telegram_regger.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Python.telegram_regger" />
+      </list>
+    </recent_temporary>
   </component>
   <component name="SharedIndexes">
     <attachedChunks>

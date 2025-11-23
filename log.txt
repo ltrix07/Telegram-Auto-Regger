@@ -1,0 +1,6 @@
+2025-11-23 01:29:02,847 - INFO - libssl.py:79 - <module>() - Failed to load SSL library: <class 'OSError'> (no library called "ssl" found)
+2025-11-23 01:29:02,848 - INFO - aes.py:25 - <module>() - cryptg module not installed and libssl not found, falling back to (slower) Python encryption
+2025-11-23 01:29:09,308 - ERROR - telegram_regger.py:536 - main() - Error in main loop: 'profiles'
+2025-11-23 01:32:08,865 - INFO - libssl.py:79 - <module>() - Failed to load SSL library: <class 'OSError'> (no library called "ssl" found)
+2025-11-23 01:32:08,866 - INFO - aes.py:25 - <module>() - cryptg module not installed and libssl not found, falling back to (slower) Python encryption
+2025-11-23 01:32:13,492 - ERROR - telegram_regger.py:536 - main() - Error in main loop: 'profiles'
