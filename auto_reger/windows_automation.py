@@ -1,20 +1,15 @@
 import logging
 import os
-import random
 import re
 import time
-from typing import Literal, Optional
+from pathlib import Path
+from typing import Optional
 
 import psutil
-import pyautogui
-import win32con
-import win32gui
+from DrissionPage import ChromiumOptions, ChromiumPage
 from pywinauto import Application, findwindows
-from pywinauto.findwindows import ElementNotFoundError
-from selenium.common.exceptions import NoSuchElementException
 
-from .utils import LOG_FILE
-
+from .utils import LOG_FILE, get_config_value, resolve_project_path
 
 logging.basicConfig(
     filename=str(LOG_FILE),
@@ -24,839 +19,260 @@ logging.basicConfig(
 )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def maximize_window(window_handle: int) -> None:
-    """
-    Maximize a top-level window using Win32 API.
-    """
-    win32gui.ShowWindow(window_handle, win32con.SW_MAXIMIZE)
+WINDOW_WAIT_SECONDS = float(get_config_value(["timeouts", "window_wait_seconds"], 20))
+POLL_INTERVAL_SECONDS = float(get_config_value(["timeouts", "poll_interval_seconds"], 1.0))
+VPN_SETTLE_SECONDS = float(get_config_value(["timeouts", "vpn_settle_seconds"], 5.0))
+KEY_DELAY_SECONDS = float(get_config_value(["timeouts", "desktop_key_delay_seconds"], 0.2))
 
 
-def get_handle(app_title_regex: str) -> Optional[int]:
-    """
-    Find first top-level window whose title matches the given regex.
-
-    :param app_title_regex: Regex for window title.
-    :return: Window handle (HWND) or None if not found.
-    """
-    try:
-        handles = findwindows.find_windows(title_re=app_title_regex)
-        if handles:
-            return handles[0]
-        return None
-    except findwindows.ElementNotFoundError:
-        return None
+class WindowsAutomationError(RuntimeError):
+    """Base exception for Windows automation failures."""
 
 
-# ---------------------------------------------------------------------------
-# Base class for Windows GUI apps
-# ---------------------------------------------------------------------------
+class AppLaunchError(WindowsAutomationError):
+    """Raised when a desktop application cannot be started or attached."""
+
+
+class VPNConnectionError(WindowsAutomationError):
+    """Raised when VPN connection action fails."""
+
 
 class App:
-    """
-    Base helper for automating Windows desktop applications using pywinauto.
-
-    Responsibilities:
-      * Start or attach to a running app.
-      * Find main window using a title regex.
-      * Gracefully close main window and kill background processes.
-    """
-
     def __init__(self) -> None:
         self.handle_title: Optional[str] = None
         self.app_name: Optional[str] = None
         self.app: Optional[Application] = None
 
-    # ---------------------------- core lifecycle ----------------------------
+    def _wait_for_handle(self, timeout_seconds: float = WINDOW_WAIT_SECONDS) -> Optional[int]:
+        if not self.handle_title:
+            return None
+
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            handles = findwindows.find_windows(title_re=self.handle_title)
+            if handles:
+                return handles[0]
+            time.sleep(POLL_INTERVAL_SECONDS)
+        return None
 
     def start_app(
         self,
-        app_name: Optional[str] = None,
+        app_name: str,
         app_path: Optional[str] = None,
         backend: str = "uia",
     ) -> Application:
-        """
-        Start (or attach to) a Windows application.
-
-        Known presets:
-          * app_name='onion' → Google Chrome with Onion Mail tab.
-          * app_name='vpn'   → ExpressVPN UI.
-          * app_path containing 'Telegram.exe' → Telegram Desktop.
-
-        :param app_name: Logical app name used by this project.
-        :param app_path: Full path to executable (if not using preset).
-        :param backend: pywinauto backend, usually 'uia'.
-        :return: Connected pywinauto.Application instance.
-        """
         app = Application(backend=backend)
 
-        if not app_name and not app_path:
-            raise ValueError("You must specify either app_name or app_path")
-
-        # Preset configuration
-        if app_name == "onion":
-            self.handle_title = ".*Google Chrome.*"
-            # NOTE: this path is environment-specific, adjust if needed
-            app_path = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-            self.app_name = os.path.basename(app_path)
-
-        elif app_name == "vpn":
-            self.handle_title = "ExpressVPN.*"
-            app_path = r"C:\Program Files (x86)\ExpressVPN\expressvpn-ui\ExpressVPN.exe"
-            self.app_name = os.path.basename(app_path)
-
-        # Telegram Desktop by explicit path
-        if app_path and "Telegram.exe" in app_path:
-            self.handle_title = "Telegram"
-            self.app_name = os.path.basename(app_path)
-
-        if not self.handle_title:
-            raise ValueError("handle_title is not set; unknown app preset")
-
-        # Try to attach to existing instance first
-        handle = get_handle(self.handle_title)
-        if handle:
-            logging.info("Attaching to existing window: %s (handle=%s)", self.handle_title, handle)
-            app.connect(handle=handle)
+        if app_name == "vpn":
+            self.handle_title = str(
+                get_config_value(["windows_automation", "vpn_window_title_regex"], "ExpressVPN.*")
+            )
+            if app_path is None:
+                raw_path = str(get_config_value(["paths", "express_vpn_executable"], "")).strip()
+                if not raw_path:
+                    raise AppLaunchError("`paths.express_vpn_executable` is not set in config.yaml")
+                app_path = str(resolve_project_path(raw_path))
+        elif app_name == "telegram":
+            self.handle_title = str(get_config_value(["windows_automation", "telegram_window_title"], "Telegram"))
+            if not app_path:
+                raise AppLaunchError("Telegram Desktop executable path is required")
         else:
-            # Start a new instance
-            logging.info("Starting application: %s", app_path)
-            app.start(app_path or self.app_name)
-            # Wait for main window to appear
-            handle = None
-            timeout = time.time() + 60
-            while time.time() < timeout:
-                handle = get_handle(self.handle_title)
-                if handle:
-                    break
-                time.sleep(1)
-            if not handle:
-                raise RuntimeError(f"Failed to find window with title {self.handle_title!r} after launch")
+            raise AppLaunchError(f"Unknown app type: {app_name}")
 
+        app_path = os.path.expandvars(os.path.expanduser(app_path))
+        self.app_name = Path(app_path).name
+
+        handle = self._wait_for_handle(timeout_seconds=POLL_INTERVAL_SECONDS)
+        if handle:
+            logging.info("Attaching to existing window `%s`", self.handle_title)
+            app.connect(handle=handle)
+            self.app = app
+            return app
+
+        if not os.path.exists(app_path):
+            raise AppLaunchError(f"Executable not found: {app_path}")
+
+        logging.info("Starting application: %s", app_path)
+        app.start(app_path)
+
+        handle = self._wait_for_handle(timeout_seconds=WINDOW_WAIT_SECONDS)
+        if not handle:
+            raise AppLaunchError(f"Window not found after launch: {self.handle_title}")
+
+        app.connect(handle=handle)
         self.app = app
         return app
 
-    # ---------------------------- small helpers -----------------------------
-
-    @staticmethod
-    def get_element_by_position(window, control_type: str, left: int, top: int, right: int, bottom: int):
-        """
-        Find first descendant element of given control_type by absolute bounds.
-
-        This is very brittle and depends on exact DPI/layout, but kept for
-        compatibility with the original project.
-        """
-        elements = window.descendants(control_type=control_type)
-        for elem in elements:
-            rect = elem.rectangle()
-            if rect.left == left and rect.top == top and rect.right == right and rect.bottom == bottom:
-                return elem
-        return None
-
-    # ----------------------------- shutdown ---------------------------------
-
     def close(self) -> None:
-        """
-        Close main window and kill remaining background processes.
-
-        This uses both pywinauto (for main window) and psutil (for lingering
-        processes with the same executable name).
-        """
-        if not self.handle_title:
-            logging.warning("close() called without handle_title configured")
+        if not self.app_name:
             return
 
-        try:
-            app = Application(backend="uia").connect(title_re=self.handle_title)
-            app.window(title_re=self.handle_title).close()
-            logging.info("Main window %s closed", self.handle_title)
-        except Exception as e:
-            logging.warning("Failed to close main window %s: %s", self.handle_title, e)
-
-        # Kill background processes by name
-        if self.app_name:
-            for proc in psutil.process_iter(["name"]):
-                try:
-                    if proc.info["name"] == self.app_name:
-                        logging.info("Killing background process: %s", proc.info["name"])
-                        proc.kill()
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-
-
-# ---------------------------------------------------------------------------
-# Onion Mail via Google Chrome
-# ---------------------------------------------------------------------------
-
-class Onion(App):
-    """
-    Automation wrapper for Onion Mail web UI (running in Google Chrome).
-
-    Used for:
-      * Registering new mailbox.
-      * Logging in with existing mailbox.
-      * Extracting confirmation codes from inbox (Telegram / Instagram).
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.app = self.start_app("onion")
-        self.window = None
-
-    # ---------------------------- captcha helpers ---------------------------
-
-    def _is_capcha_window_present(self, timeout: int = 5) -> bool:
-        """
-        Check whether a reCAPTCHA/anti-bot Chrome window is present.
-
-        Looks for a separate Chrome window with title "Один момент..." which
-        appears when Google performs additional checks.
-        """
-        end_time = time.time() + timeout
-        while time.time() < end_time:
+        for proc in psutil.process_iter(["name", "pid"]):
             try:
-                window = self.app.window(title_re="Один момент.*Google Chrome.*")
-                if window.exists():
-                    return True
-            except Exception:
-                pass
-            time.sleep(1)
-        return False
+                proc_name = (proc.info.get("name") or "").lower()
+                if proc_name == self.app_name.lower():
+                    proc.kill()
+                    logging.info("Killed process `%s` (pid=%s)", self.app_name, proc.info.get("pid"))
+            except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
+                logging.warning("Failed to kill `%s`: %s", self.app_name, exc)
 
-    def capcha_hack(self) -> bool:
-        """
-        Attempt to automatically pass the "I'm not a robot" checkbox.
 
-        This logic is highly environment-specific and may require manual
-        adjustments (coordinates, language, etc.). The idea:
+class Onion:
+    def __init__(self) -> None:
+        co = ChromiumOptions()
+        chrome_path_cfg = str(get_config_value(["paths", "chrome_executable"], "")).strip()
+        if chrome_path_cfg:
+            chrome_path = str(resolve_project_path(chrome_path_cfg))
+            if os.path.exists(chrome_path):
+                co.set_browser_path(chrome_path)
+            else:
+                logging.warning("Configured Chrome path does not exist: %s", chrome_path)
 
-          * Wait for the Chrome window "Один момент...".
-          * Wait for the "Подтвердите, что вы человек" checkbox.
-          * Use pyautogui to move and click the checkbox if visible.
-        """
-        try:
-            window = self.app.window(title_re="Один момент.*Google Chrome.*")
-            window.wait("visible", timeout=20)
-            window.set_focus()
+        co.set_argument("--no-first-run")
+        co.set_argument("--force-color-profile=srgb")
+        co.set_argument("--password-store=basic")
+        co.set_argument("--no-default-browser-check")
 
-            start_time = time.time()
-            while time.time() - start_time < 300:
-                if not window.exists():
-                    logging.info("Captcha window disappeared during waiting")
-                    return False
-
-                try:
-                    checkbox = window.child_window(
-                        title="Подтвердите, что вы человек",
-                        control_type="CheckBox",
-                    )
-                    if checkbox.exists() and checkbox.is_visible():
-                        # Try to click via pywinauto first
-                        try:
-                            checkbox.click_input()
-                            logging.info("Captcha checkbox clicked via UIA")
-                            return True
-                        except Exception:
-                            # Fallback: approximate center using pyautogui
-                            rect = checkbox.rectangle()
-                            x = rect.left + rect.width() // 2
-                            y = rect.top + rect.height() // 2
-                            pyautogui.moveTo(x, y, duration=0.5)
-                            pyautogui.click()
-                            logging.info("Captcha checkbox clicked via pyautogui")
-                            return True
-
-                except ElementNotFoundError:
-                    pass
-
-                time.sleep(3)
-
-            logging.warning("Captcha window did not show a checkbox in time")
-            return False
-        except Exception as e:
-            logging.error("Error during captcha hack: %s", e)
-            return False
-
-    # -------------------------- registration / login ------------------------
+        self.page = ChromiumPage(addr_or_opts=co)
 
     def reg_and_login(self, username: str, password: str, domain: Optional[str] = None) -> Optional[str]:
-        """
-        Register a new Onion Mail account and log in with it.
-
-        The method:
-          * Attaches to 'Onion Mail' Chrome tab.
-          * If currently logged in (INBOX visible), logs out.
-          * Opens "Create account" form.
-          * Solves captcha if needed.
-          * Fills name / username / password fields.
-          * Submits the form.
-          * Logs in using new credentials.
-
-        :param username: Desired username (without domain).
-        :param password: Password for the mailbox.
-        :param domain: Optional custom domain (e.g. "onionmail.org").
-        :return: Full email address on success, None on failure.
-        """
-        email: Optional[str] = None
-
         try:
-            self.window = self.app.window(title_re="Onion Mail.*Google Chrome.*")
-            self.window.wait("ready", timeout=20)
-            self.window.set_focus()
-            logging.info("Found Chrome window with Onion Mail tab")
+            logging.info("Navigating to Onion Mail registration")
+            self.page.get("https://onionmail.org/create")
 
-            # If already logged in (INBOX visible) → log out first
-            try:
-                is_inbox_txt = self.window.child_window(
-                    title=" INBOX", control_type="Text", found_index=0
-                ).exists(timeout=1)
-            except ElementNotFoundError:
-                is_inbox_txt = False
+            field_timeout = int(get_config_value(["timeouts", "element_search_seconds"], 10))
+            username_el = self.page.ele("@name=username", timeout=field_timeout)
+            password_el = self.page.ele("@name=password", timeout=field_timeout)
+            confirm_el = self.page.ele("@name=confirm", timeout=field_timeout)
 
-            if is_inbox_txt:
-                buttons = self.window.descendants(control_type="Button")
-                target_btn = None
-                for btn in buttons:
-                    rect = btn.rectangle()
-                    # These coordinates are from the original project and may
-                    # need tuning depending on DPI/layout.
-                    if rect.top == 108 and rect.right == 1682 and rect.bottom == 172:
-                        target_btn = btn
-                        break
-                if target_btn:
-                    target_btn.click_input()
-                    logging.info("Main menu activated")
+            if not (username_el and password_el and confirm_el):
+                logging.error("Onion Mail registration form did not load in time")
+                return None
 
-                try:
-                    log_out = self.window.child_window(
-                        control_type="Hyperlink", title="Log out", found_index=0
-                    )
-                    log_out.wait("visible", timeout=3)
-                except Exception:
-                    log_out = self.window.child_window(
-                        control_type="Hyperlink", title=" Log out", found_index=0
-                    )
-                    log_out.wait("visible", timeout=3)
-                log_out.invoke()
-                logging.info("Successfully logged out from previous account")
+            username_el.input(username)
+            password_el.input(password)
+            confirm_el.input(password)
 
-            # Open "Create account" form
-            create_acc_btn = self.window.child_window(
-                title=" Create account",
-                control_type="Hyperlink",
-                found_index=0,
-            )
-            create_acc_btn.wait("visible", timeout=10)
-            create_acc_btn.invoke()
-            logging.info("Create account form opened")
+            create_btn = self.page.ele("text:Create", timeout=field_timeout)
+            if create_btn:
+                create_btn.click()
 
-            # Handle captcha if it appears
-            if self._is_capcha_window_present(timeout=10):
-                logging.info("Captcha window detected, starting capcha_hack()")
-                if self.capcha_hack():
-                    logging.info("Captcha passed")
-                else:
-                    logging.error("Captcha hack failed")
-            else:
-                logging.info("Captcha window not detected, continuing")
+            continue_btn = self.page.ele("text:Continue", timeout=5)
+            if continue_btn:
+                continue_btn.click()
 
-            # Domain selection
-            if domain:
-                domain_menu = self.window.child_window(
-                    control_type="Button", title="@onionmail.org", found_index=0
-                )
-                domain_menu.wait("visible", timeout=30)
-                domain_menu.click_input()
+            inbox_timeout = int(get_config_value(["timeouts", "page_load_seconds"], 30))
+            if self.page.wait.ele("text:Logout", timeout=inbox_timeout):
+                logging.info("Successfully registered and logged in to Onion Mail")
+                mail_domain = domain or "onionmail.org"
+                return f"{username}@{mail_domain}"
 
-                domain_item = self.window.child_window(
-                    control_type="Hyperlink", title=domain, found_index=0
-                )
-                domain_item.wait("visible", timeout=10)
-                domain_item.click_input()
-                email = f"{username}@{domain}"
-            else:
-                email = f"{username}@onionmail.org"
-
-            # Fill registration fields
-            name_field = self.window.child_window(
-                control_type="Edit", auto_id="name", found_index=0
-            )
-            name_field.wait("ready", timeout=60)
-            time.sleep(1)
-            name_field.set_text("")
-            name_field.type_keys(username, with_spaces=True)
-            logging.info("Name entered")
-
-            username_field = self.window.child_window(
-                control_type="Edit", auto_id="username", found_index=0
-            )
-            username_field.wait("ready", timeout=60)
-            username_field.set_text("")
-            username_field.type_keys(username, with_spaces=True)
-            logging.info("Username entered")
-
-            password_field = self.window.child_window(
-                control_type="Edit", auto_id="password", found_index=0
-            )
-            password_field.wait("ready", timeout=60)
-            password_field.set_text("")
-            password_field.type_keys(password, with_spaces=True)
-            logging.info("Password entered")
-
-            repeat_password_field = self.window.child_window(
-                control_type="Edit", auto_id="repassword", found_index=0
-            )
-            repeat_password_field.wait("ready", timeout=60)
-            repeat_password_field.set_text("")
-            repeat_password_field.type_keys(password, with_spaces=True)
-            logging.info("Password repeated")
-
-            # Checkbox: "I agree to the Terms..."
-            agree_checkbox = self.window.child_window(
-                control_type="CheckBox", auto_id="terms", found_index=0
-            )
-            agree_checkbox.wait("ready", timeout=10)
-            if not agree_checkbox.is_checked():
-                agree_checkbox.click_input()
-            logging.info("Terms checkbox checked")
-
-            # Submit registration
-            create_account_btn = self.window.child_window(
-                control_type="Button", title="CREATE NEW ACCOUNT", found_index=0
-            )
-            create_account_btn.wait("visible", timeout=10)
-            create_account_btn.invoke()
-            logging.info("New mailbox created")
-            time.sleep(5)
-
-            # Log in with new credentials
-            try:
-                is_login_txt = self.window.child_window(
-                    title=" Log in", control_type="Text", found_index=0
-                ).exists(timeout=10)
-            except ElementNotFoundError:
-                is_login_txt = False
-
-            if is_login_txt:
-                username_field_log = self.window.child_window(
-                    control_type="Edit", auto_id="username", found_index=0
-                )
-                username_field_log.wait("visible", timeout=60)
-                username_field_log.set_text("")
-                username_field_log.type_keys(username, with_spaces=True)
-                logging.info("Login username entered")
-
-                password_field_log = self.window.child_window(
-                    control_type="Edit", auto_id="password", found_index=0
-                )
-                password_field_log.wait("visible", timeout=60)
-                password_field_log.set_text("")
-                password_field_log.type_keys(password, with_spaces=True)
-                logging.info("Login password entered")
-
-                try:
-                    login_btn = self.window.child_window(
-                        control_type="Button", title=" LOG IN"
-                    )
-                    login_btn.wait("visible", timeout=1)
-                except Exception:
-                    login_btn = self.window.child_window(
-                        control_type="Button", title="LOG IN"
-                    )
-                    login_btn.wait("visible", timeout=1)
-
-                login_btn.click_input()
-                logging.info("Logged into newly created mailbox")
-
-            return email
-
-        except ElementNotFoundError as e:
-            logging.error("ElementNotFoundError during reg_and_login: %s", e)
-            if self.window:
-                self.window.print_control_identifiers()
+            logging.error("Onion Mail registration failed: inbox not detected")
             return None
-        except Exception as e:
-            logging.error("General error during reg_and_login: %s", e)
-            if self.window:
-                self.window.print_control_identifiers()
+        except Exception:
+            logging.exception("Error during Onion Mail registration")
             return None
-
-    # ------------------------------- inbox ----------------------------------
 
     def extract_code(
         self,
-        service: Literal["telegram", "instagram"],
-        time_out: int = 5,
+        service: str = "telegram",
+        timeout_minutes: int = 5,
         second_req: bool = False,
-    ) -> str:
-        """
-        Extract numeric confirmation code for the given service from inbox.
+    ) -> Optional[str]:
+        del second_req
+        logging.info("Checking inbox for `%s` code", service)
 
-        This is a best-effort implementation based on the original logic:
+        if not self.page.url.endswith("/inbox"):
+            self.page.get("https://onionmail.org/inbox")
 
-          * Open Onion Mail tab in Chrome.
-          * Click "Reload" button several times.
-          * Locate the latest message related to the given service.
-          * Extract the first 5–6 digit number from message preview.
+        deadline = time.monotonic() + timeout_minutes * 60
+        while time.monotonic() < deadline:
+            refresh_btn = self.page.ele("text:Check mail", timeout=3)
+            if refresh_btn:
+                refresh_btn.click()
+            else:
+                self.page.refresh()
 
-        :param service: "telegram" or "instagram".
-        :param time_out: Wait timeout for each UI operation.
-        :param second_req: For Telegram, optionally use alternative subject
-                           text for a second request.
-        :return: Code as string, or empty string if not found.
-        """
-        attempts = 3
-        attempt = 0
-        code_text = ""
+            page_text = self.page.html
+            if service == "telegram":
+                match = re.search(r"Login code:\s*(\d{5})", page_text)
+                if match:
+                    code = match.group(1)
+                    logging.info("Found `%s` code", service)
+                    return code
 
+            time.sleep(POLL_INTERVAL_SECONDS)
+
+        logging.warning("Code not found in inbox for `%s` within %s minutes", service, timeout_minutes)
+        return None
+
+    def close(self) -> None:
         try:
-            self.window = self.app.window(title_re="Onion Mail.*Google Chrome.*")
-            self.window.wait("visible", timeout=20)
-            self.window.set_focus()
+            self.page.quit()
+        except Exception:
+            logging.exception("Failed to close browser page")
 
-            while attempt < attempts:
-                attempt += 1
-
-                # Reload inbox
-                try:
-                    reload_page = self.window.child_window(
-                        title="Перезагрузить",
-                        control_type="Button",
-                        found_index=0,
-                    )
-                    reload_page.wait("visible", timeout=time_out)
-                    reload_page.invoke()
-                    logging.info("Inbox reloaded (attempt %s)", attempt)
-                except ElementNotFoundError:
-                    logging.warning("Reload button not found on attempt %s", attempt)
-
-                time.sleep(3)
-
-                # Try to locate message element depending on service
-                try:
-                    if service == "telegram":
-                        # Different subjects may be used; we try several variants
-                        subjects = [
-                            "Telegram",
-                            "Telegram code",
-                            "Login code",
-                        ]
-                        if second_req:
-                            subjects.insert(0, "Telegram (second request)")
-
-                        msg = None
-                        for subj in subjects:
-                            try:
-                                msg = self.window.child_window(
-                                    title_re=f".*{re.escape(subj)}.*",
-                                    control_type="Text",
-                                )
-                                if msg.exists():
-                                    break
-                            except ElementNotFoundError:
-                                continue
-                    else:  # instagram
-                        msg = self.window.child_window(
-                            title_re=".*Instagram.*",
-                            control_type="Text",
-                        )
-
-                    if msg and msg.exists():
-                        text = msg.window_text()
-                        m = re.search(r"(\d{5,6})", text)
-                        if m:
-                            code_text = m.group(1)
-                            logging.info(
-                                "Found %s code in inbox on attempt %s: %s",
-                                service,
-                                attempt,
-                                code_text,
-                            )
-                            break
-                except ElementNotFoundError:
-                    logging.info("Service message not found on attempt %s", attempt)
-
-            return code_text
-
-        except Exception as e:
-            logging.error("Error while extracting %s code: %s", service, e)
-            if self.window:
-                self.window.print_control_identifiers()
-            return ""
-
-
-# ---------------------------------------------------------------------------
-# ExpressVPN automation
-# ---------------------------------------------------------------------------
 
 class VPN(App):
-    """
-    Automation wrapper for ExpressVPN desktop app.
-
-    Used for:
-      * Disconnecting/connecting VPN.
-      * Changing location (country).
-    """
-
-    def __init__(self, backend: str = "uia") -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.app = self.start_app("vpn", backend=backend)
-        self.window = None
+        self.start_app("vpn")
 
-    def reconnection(self) -> bool:
-        """
-        Disconnect and reconnect VPN on ExpressVPN main window.
+    def _vpn_window(self):
+        if self.app is None:
+            raise VPNConnectionError("VPN app is not initialised")
 
-        :return: True on success, False on error.
-        """
+        window = self.app.window(title_re=self.handle_title or "ExpressVPN.*")
+        window.wait("exists enabled visible ready", timeout=WINDOW_WAIT_SECONDS)
+        return window
+
+    def connect(self) -> None:
         try:
-            window = self.app.window(title_re="ExpressVPN.*")
-            window.wait("visible", timeout=20)
-            window.set_focus()
-            logging.info("Found ExpressVPN window")
+            logging.info("Connecting VPN")
+            win = self._vpn_window()
+            win.set_focus()
+            win.type_keys("{ENTER}")
+            time.sleep(VPN_SETTLE_SECONDS)
+        except Exception as exc:
+            logging.exception("Failed to connect VPN")
+            raise VPNConnectionError("Failed to connect VPN") from exc
 
-            disconnect_btn = window.child_window(
-                title_re=r"Отключиться от.*", control_type="Button"
-            )
-            disconnect_btn.invoke()
-            logging.info("Disconnecting from VPN...")
-            time.sleep(5)
-
-            connect_btn = window.child_window(
-                title_re=r"Подключиться к.*", control_type="Button"
-            )
-            connect_btn.wait("visible", timeout=60)
-            connect_btn.invoke()
-            logging.info("Reconnecting to VPN...")
-            time.sleep(10)
-
-            logging.info("IP successfully changed via reconnection")
-            return True
-
-        except ElementNotFoundError as e:
-            logging.error("ElementNotFoundError during VPN reconnection: %s", e)
-            window.print_control_identifiers()
-            return False
-        except NotImplementedError as e:
-            logging.error("NotImplementedError during VPN reconnection: %s", e)
-            return False
-        except Exception as e:
-            logging.error("General error during VPN reconnection: %s", e)
-            window.print_control_identifiers()
-            return False
-
-    def change_location(self, country: str) -> bool:
-        """
-        Change VPN location to a random server in the given country.
-
-        The original logic relied on the location tree inside ExpressVPN UI:
-
-          * Click "Choose another location".
-          * Enumerate nodes in the Tree control.
-          * Pick a random entry whose text starts with `<country> -`.
-          * Click it.
-
-        :param country: Country name (e.g. "United States", "Canada").
-        :return: True if a location was changed, False otherwise.
-        """
+    def disconnect(self) -> None:
         try:
-            window = self.app.window(title_re="ExpressVPN.*")
-            window.wait("visible", timeout=20)
-            window.set_focus()
-            logging.info("Found ExpressVPN window")
+            logging.info("Disconnecting VPN")
+            win = self._vpn_window()
+            win.set_focus()
+            win.type_keys("{ENTER}")
+            time.sleep(POLL_INTERVAL_SECONDS)
+        except Exception:
+            logging.exception("Failed to disconnect VPN")
 
-            change_location_btn = window.child_window(
-                title="Выбрать другую локацию", control_type="Button"
-            )
-            change_location_btn.invoke()
-            time.sleep(2)
-
-            usa_window = window.child_window(control_type="Window").child_window(
-                control_type="Tree"
-            )
-            btns_with_location = usa_window.descendants(control_type="TreeItem")[1:]
-
-            if btns_with_location:
-                while True:
-                    random_button = random.choice(btns_with_location)
-                    text = random_button.texts()[0]
-                    if f"{country} -" not in text:
-                        continue
-                    random_button.click_input()
-                    logging.info("Location changed to: %s", text)
-                    break
-                return True
-
-            logging.info("No matching location buttons found for country %s", country)
-            return False
-
-        except ElementNotFoundError as e:
-            logging.error("ElementNotFoundError during change_location: %s", e)
-            window.print_control_identifiers()
-            return False
-        except NotImplementedError as e:
-            logging.error("NotImplementedError during change_location: %s", e)
-            return False
-        except Exception as e:
-            logging.error("General error during change_location: %s", e)
-            window.print_control_identifiers()
-            return False
-
-
-# ---------------------------------------------------------------------------
-# Telegram Desktop automation
-# ---------------------------------------------------------------------------
 
 class TelegramDesktop(App):
-    """
-    Automation wrapper for Telegram Desktop client on Windows.
-
-    Used for:
-      * Entering a phone number.
-      * Typing the login code received via SMS.
-    """
-
     def __init__(self, app_path: str) -> None:
         super().__init__()
-        self.app = self.start_app(app_path=app_path)
-        self.app_name = os.path.basename(app_path)
-        self.window = None
+        self.start_app("telegram", app_path=app_path)
 
-    def start_and_enter_number(self, phone_number: str) -> bool:
-        """
-        Open Telegram Desktop window and enter phone number into login form.
+    def start_and_enter_number(self, phone: str) -> None:
+        if self.app is None:
+            raise AppLaunchError("Telegram Desktop app is not initialised")
 
-        This relies on the standard login screen layout and may require
-        adjustments for localized UI or future Telegram updates.
+        title = str(get_config_value(["windows_automation", "telegram_window_title"], "Telegram"))
+        win = self.app.window(title_re=title)
+        win.wait("exists enabled visible ready", timeout=WINDOW_WAIT_SECONDS)
+        win.set_focus()
 
-        :param phone_number: Phone number in international format.
-        :return: True on success, False on error.
-        """
-        try:
-            self.window = self.app.window(title="Telegram")
-            self.window.wait("ready", timeout=30)
+        win.type_keys("{ENTER}")
+        time.sleep(KEY_DELAY_SECONDS)
+        win.type_keys(phone, with_spaces=True, pause=0.05)
+        win.type_keys("{ENTER}")
 
-            maximize_window(self.window.handle)
-            self.window.set_focus()
-            time.sleep(2)
-            logging.info("Telegram window found and maximized")
+    def enter_code(self, code: str) -> None:
+        if self.app is None:
+            raise AppLaunchError("Telegram Desktop app is not initialised")
 
-            # Typical login flow:
-            #  1. Click "Start Messaging" / "Log in"
-            #  2. Type phone number
-            #  3. Click "Next"
-            try:
-                start_btn = self.window.child_window(
-                    title_re=".*Start Messaging.*|.*Log in.*",
-                    control_type="Button",
-                )
-                if start_btn.exists():
-                    start_btn.click_input()
-                    logging.info("Start/Login button clicked")
-                    time.sleep(2)
-            except ElementNotFoundError:
-                logging.info("Start/Login button not found — maybe already on phone screen")
-
-            # Try to find input field by control type/position
-            number_input_field = None
-            try:
-                # Many builds use a single Edit field for the number
-                number_input_field = self.window.child_window(
-                    control_type="Edit",
-                    found_index=0,
-                )
-            except ElementNotFoundError:
-                pass
-
-            if not number_input_field:
-                # Fallback: use legacy coordinates heuristic
-                number_input_field = self.get_element_by_position(
-                    self.window, "Edit", 772, 550, 1147, 600
-                )
-
-            if not number_input_field:
-                logging.error("Phone number input field not found")
-                return False
-
-            number_input_field.set_text("")
-            number_input_field.type_keys(phone_number, with_spaces=True)
-            logging.info("Phone number typed")
-
-            # "Next" button heuristic: by position or title
-            try:
-                next_btn = self.window.child_window(
-                    title_re=".*Next.*", control_type="Button"
-                )
-                if next_btn.exists():
-                    next_btn.click_input()
-                    logging.info("Next button clicked")
-                    return True
-            except ElementNotFoundError:
-                pass
-
-            next_btn = self.get_element_by_position(
-                self.window, "Group", 772, 608, 1147, 660
-            )
-            if next_btn:
-                next_btn.click_input()
-                logging.info("SMS request sent (Next button clicked via position)")
-                return True
-
-            logging.error("Next button not found")
-            return False
-
-        except ElementNotFoundError as e:
-            logging.error("ElementNotFoundError during start_and_enter_number: %s", e)
-            if self.window:
-                self.window.print_control_identifiers()
-            return False
-        except NotImplementedError as e:
-            logging.error("NotImplementedError during start_and_enter_number: %s", e)
-            return False
-        except Exception as e:
-            logging.error("General error during start_and_enter_number: %s", e)
-            if self.window:
-                self.window.print_control_identifiers()
-            return False
-
-    def enter_code(self, code: str) -> bool:
-        """
-        Enter received login code into Telegram Desktop login form.
-
-        :param code: Login code as string.
-        :return: True on success, False on error.
-        """
-        try:
-            if not self.window:
-                self.window = self.app.window(title="Telegram")
-                self.window.wait("ready", timeout=30)
-
-            self.window.set_focus()
-            time.sleep(1)
-
-            # Usually Telegram has a single Edit field for the login code.
-            code_field = self.window.child_window(
-                control_type="Edit", found_index=0
-            )
-            code_field.wait("visible", timeout=20)
-            code_field.set_text("")
-            code_field.type_keys(code, with_spaces=False)
-            logging.info("Login code entered into Telegram Desktop")
-            return True
-
-        except ElementNotFoundError as e:
-            logging.error("ElementNotFoundError during enter_code: %s", e)
-            if self.window:
-                self.window.print_control_identifiers()
-            return False
-        except NotImplementedError as e:
-            logging.error("NotImplementedError during enter_code: %s", e)
-            return False
-        except Exception as e:
-            logging.error("General error during enter_code: %s", e)
-            if self.window:
-                self.window.print_control_identifiers()
-            return False
+        title = str(get_config_value(["windows_automation", "telegram_window_title"], "Telegram"))
+        win = self.app.window(title_re=title)
+        win.wait("exists enabled visible ready", timeout=WINDOW_WAIT_SECONDS)
+        win.set_focus()
+        win.type_keys(code, with_spaces=True, pause=0.05)

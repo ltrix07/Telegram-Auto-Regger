@@ -3,10 +3,9 @@ import logging
 import os
 import random
 import subprocess
-import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
 import psutil
 import requests
@@ -35,11 +34,51 @@ def load_config(config_name: str = "config.yaml") -> Dict[str, Any]:
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Invalid YAML in config file: {config_path}") from exc
+
+    if not isinstance(data, dict):
+        raise ValueError(f"Config root must be a mapping: {config_path}")
+
+    return data
 
 
 CONFIG: Dict[str, Any] = load_config()
+
+
+def get_config_value(keys: Sequence[str], default: Any = None) -> Any:
+    """
+    Safely read nested config values.
+
+    :param keys: Sequence of nested keys.
+    :param default: Fallback value.
+    :return: Config value or default.
+    """
+    current: Any = CONFIG
+    for key in keys:
+        if not isinstance(current, dict):
+            return default
+        current = current.get(key)
+        if current is None:
+            return default
+    return current
+
+
+def resolve_project_path(path_value: str) -> Path:
+    """
+    Resolve a path value relative to project root and expand env vars.
+
+    :param path_value: Raw path from config.
+    :return: Absolute Path.
+    """
+    expanded = os.path.expandvars(os.path.expanduser(path_value))
+    path = Path(expanded)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path
 
 
 def read_json(path: str) -> Any:
@@ -94,7 +133,7 @@ def read_txt_list(file_path: str) -> List[str]:
         return f_o.readlines()
 
 
-def load_names(file_path: str) -> List[str]:
+def load_names(file_path: str | None = None) -> List[str]:
     """
     Load a list of names from a text file (one name per line).
 
@@ -103,7 +142,14 @@ def load_names(file_path: str) -> List[str]:
     :param file_path: Path to the names file.
     :return: List of normalized names.
     """
-    with open(file_path, "r", encoding="utf-8") as f:
+    if file_path is None:
+        file_path = str(get_config_value(["paths", "last_names_file"], "last_names.txt"))
+
+    resolved_path = resolve_project_path(file_path)
+    if not resolved_path.exists():
+        raise FileNotFoundError(f"Names file not found: {resolved_path}")
+
+    with open(resolved_path, "r", encoding="utf-8") as f:
         return [line.strip() for line in f if line.strip()]
 
 
@@ -262,7 +308,7 @@ def _is_process_running(process_name: str) -> bool:
     return False
 
 
-def kill_emulator(app_name: str) -> None:
+def kill_emulator(app_name: str | None = None) -> None:
     """
     Terminate emulator process by name using taskkill on Windows.
 
@@ -270,14 +316,28 @@ def kill_emulator(app_name: str) -> None:
 
     :param app_name: Executable name, e.g. 'dnplayer.exe'.
     """
+    if not app_name:
+        app_name = str(get_config_value(["emulator", "process_name"], "")).strip()
+
+    if not app_name:
+        raise ValueError("Emulator process name is required")
+
     if _is_process_running(app_name):
-        subprocess.run(
-            f"taskkill /IM {app_name} /F",
-            shell=True,
+        result = subprocess.run(
+            ["taskkill", "/IM", app_name, "/F"],
             capture_output=True,
+            text=True,
+            check=False,
         )
-        time.sleep(2)
-        logging.info("Emulator %s terminated", app_name)
+        if result.returncode == 0:
+            logging.info("Emulator %s terminated", app_name)
+        else:
+            logging.error(
+                "Failed to terminate emulator %s (code=%s, stderr=%s)",
+                app_name,
+                result.returncode,
+                result.stderr.strip(),
+            )
     else:
         logging.info("Emulator %s is not running, nothing to terminate", app_name)
 
