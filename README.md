@@ -33,7 +33,7 @@
 This repository implements a **full automation pipeline** for Telegram registration:
 
 - Controls **Android emulators or physical devices** via ADB + Appium.
-- Uses a **third-party SMS provider** (e.g. sms-activate / GrizzlySMS) to rent numbers and fetch SMS codes.
+- Uses a **third-party SMS provider** (e.g. sms-activate / GrizzlySMS / HeroSMS) to rent numbers and fetch SMS codes.
 - Optionally registers a mailbox on **Onion Mail** (through Windows UI automation) when Telegram requires an email step.
 - Uses **ExpressVPN** GUI automation to rotate IPs or switch locations.
 - Builds both **Telethon sessions** and **Telegram Desktop TData** for each registered account.
@@ -125,7 +125,7 @@ All of this is orchestrated from `telegram_regger.py`.
 
 - `sms_api.py`  
   Wrapper around `smsactivate.api.SMSActivateAPI`:
-  - Supports sms-activate / GrizzlySMS handler API.
+  - Supports sms-activate / GrizzlySMS / HeroSMS handler API.
   - Country resolution, price checks, renting numbers (`verification_number`).
   - Polling for codes (`check_verif_status`).
   - Local tracking of activations in `activations.json`.
@@ -272,10 +272,12 @@ adb:
   adb_path: "C:\Android\platform-tools\adb.exe"
 
 sms_api:
-  # "sms-activate" or "grizzly-sms"
+  # "sms-activate", "grizzly-sms", or "hero-sms"
   service_name: "sms-activate"
   # file with API key (single line)
   api_key_path: "sms_activate_api.txt"
+  # optional explicit override for provider handler URL
+  # api_url: "https://hero-sms.com/stubs/handler_api.php"
 
 profiles:
   # text files with one name per line (optional)
@@ -296,6 +298,9 @@ telethon:
   telegram_system_version: "9"
   telegram_app_version: "10.0"
 ```
+
+For HeroSMS, set `sms_api.service_name: "hero-sms"` and keep your API key in `sms_api.api_key_path` file.
+If you use a custom mirror/endpoint, set `sms_api.api_url`; this value overrides URL selection by `service_name`.
 
 You can commit a `config.yaml.example` file to the repo and keep your real `config.yaml` out of version control.
 
@@ -357,7 +362,7 @@ If something goes wrong, check:
   - Rooted emulator/device,
   - Correct ADB path,
   - Proper permissions.
-- SMS provider integration assumes **sms-activate handler API** compatibility.
+- SMS provider integration assumes **sms-activate handler API** compatibility (including HeroSMS-compatible endpoint).
 - Some parts (e.g. TData decryption, Android `tgnet.dat` conversion) rely on external libraries that must be installed separately from GitHub.
 - This project is not a polished library yet; it’s a **working automation lab**. The code is intentionally kept verbose and explicit to show how the pieces fit together.
 

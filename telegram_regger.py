@@ -376,12 +376,13 @@ def register_telegram_account(country: str, max_price: float) -> Optional[str]:
         sms_cfg = CONFIG.get("sms_api", {})
         service_name = str(sms_cfg.get("service_name", "")).strip()
         api_key_path = str(sms_cfg.get("api_key_path", "")).strip()
+        api_url = str(sms_cfg.get("api_url", "")).strip() or None
         telegram_service_code = str(sms_cfg.get("telegram_service_code", "tg"))
 
         if not service_name or not api_key_path:
             raise CriticalRegistrationError("`sms_api.service_name` and `sms_api.api_key_path` are required")
 
-        sms_api = SmsApi(service_name, str(resolve_project_path(api_key_path)))
+        sms_api = SmsApi(service_name, str(resolve_project_path(api_key_path)), api_url=api_url)
         number_data = sms_api.getNumber(service=telegram_service_code, country=country)
         if not number_data:
             raise CriticalRegistrationError("Failed to rent phone number from SMS provider")

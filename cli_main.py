@@ -205,11 +205,12 @@ def build_sms_api() -> SmsApi:
     sms_cfg = CONFIG.get("sms_api", {})
     service_name = str(sms_cfg.get("service_name", "sms-activate")).strip()
     api_key_path = str(sms_cfg.get("api_key_path", "")).strip()
+    api_url = str(sms_cfg.get("api_url", "")).strip() or None
     if not api_key_path:
         raise ValueError("Missing config key: sms_api.api_key_path")
 
     resolved_key_path = resolve_project_path(api_key_path)
-    return SmsApi(service=service_name, api_key_path=str(resolved_key_path))
+    return SmsApi(service=service_name, api_key_path=str(resolved_key_path), api_url=api_url)
 
 
 def build_email_api() -> Optional[EmailApi]:

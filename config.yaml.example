@@ -30,7 +30,11 @@ emulator:
   process_name: "dnplayer.exe"
 
 sms_api:
+  # Supported providers: "sms-activate", "grizzly-sms", "hero-sms"
+  # Aliases for HeroSMS are also accepted in code: "herosms", "hero_sms"
   service_name: "sms-activate"
+  # Optional handler API URL override (takes priority over service_name mapping)
+  # api_url: "https://hero-sms.com/stubs/handler_api.php"
   api_key_path: "secrets/sms_api_key.txt"
   telegram_service_code: "tg"
 
