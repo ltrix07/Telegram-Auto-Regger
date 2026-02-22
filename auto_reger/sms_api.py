@@ -377,7 +377,7 @@ class SmsApi(SMSActivateAPI):
         except Exception:
             logging.exception("Failed to set status=8 for activation %s", activation_id)
 
-        print("SMS code was not received within the timeout")
+        logging.warning("SMS code was not received within the timeout")
         return ""
 
 
@@ -385,4 +385,4 @@ if __name__ == "__main__":
     # Small manual test stub; replace path/service with your own if needed.
     api_key_file = os.environ.get("SMS_API_KEY_FILE", "sms_activate_api.txt")
     sms = SmsApi(service="sms-activate", api_key_path=api_key_file)
-    print("Balance:", sms.getBalance())
+    logging.info("Balance: %s", sms.getBalance())

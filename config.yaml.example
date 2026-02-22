@@ -15,10 +15,15 @@ paths:
   adb_executable: "adb"
 
 adb:
-  adb_path: "C:\\Android\\platform-tools\\adb.exe"
+  adb_path: "adb"
   device_udid: "127.0.0.1:5555"
   appium_port: 4723
   physical_device: false
+
+concurrency:
+  max_workers: 1
+  device_list:
+    - "127.0.0.1:5555"
 
 emulator:
   executable_path: "C:\\LDPlayer\\LDPlayer9\\dnplayer.exe"
@@ -28,6 +33,14 @@ sms_api:
   service_name: "sms-activate"
   api_key_path: "secrets/sms_api_key.txt"
   telegram_service_code: "tg"
+
+proxy_api:
+  key: "YOUR_PROXY_SELLER_API_KEY"
+  url: "https://proxy-seller.com/api/v1/proxy/list"
+  rotate_url: "https://proxy-seller.com/api/v1/proxy/rotate"
+  method: "GET"
+  timeout_seconds: 20
+  default_type: "socks5"
 
 telethon:
   api_id: 1231

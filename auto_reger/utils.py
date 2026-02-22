@@ -2,14 +2,19 @@ import json
 import logging
 import os
 import random
+import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Sequence
 
-import psutil
 import requests
 import yaml
+
+try:
+    import psutil
+except Exception:  # pragma: no cover - optional for non-emulator CLI runs
+    psutil = None
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LOG_FILE = PROJECT_ROOT / "log.txt"
@@ -69,16 +74,33 @@ def get_config_value(keys: Sequence[str], default: Any = None) -> Any:
 
 def resolve_project_path(path_value: str) -> Path:
     """
-    Resolve a path value relative to project root and expand env vars.
+    Resolve a path value relative to project root with cross-platform handling.
 
     :param path_value: Raw path from config.
     :return: Absolute Path.
     """
-    expanded = os.path.expandvars(os.path.expanduser(path_value))
+    raw = str(path_value or "").strip()
+    if not raw:
+        return PROJECT_ROOT
+
+    expanded = os.path.expanduser(raw)
+    expanded = os.path.expandvars(expanded)
+
+    # Expand Windows-style %VAR% placeholders even on Linux hosts.
+    expanded = re.sub(
+        r"%([^%]+)%",
+        lambda match: os.environ.get(match.group(1), match.group(0)),
+        expanded,
+    )
+
+    # Normalize Windows separators on non-Windows hosts.
+    if os.name != "nt":
+        expanded = expanded.replace("\\", "/")
+
     path = Path(expanded)
     if not path.is_absolute():
         path = PROJECT_ROOT / path
-    return path
+    return path.resolve()
 
 
 def read_json(path: str) -> Any:
@@ -302,6 +324,9 @@ def _is_process_running(process_name: str) -> bool:
     :param process_name: Executable name, e.g. 'dnplayer.exe'.
     :return: True if process is running, False otherwise.
     """
+    if psutil is None:
+        raise RuntimeError("psutil is required for process checks. Install dependencies from requirements.txt.")
+
     for proc in psutil.process_iter(["name"]):
         if proc.info.get("name", "").lower() == process_name.lower():
             return True

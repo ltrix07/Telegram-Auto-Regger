@@ -1,10 +1,11 @@
-import random
+﻿import random
 import logging
 import subprocess
 import secrets
 import time
 import string
 import base64
+import os
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -14,11 +15,22 @@ from datetime import datetime, timedelta
 
 from .utils import CONFIG
 
-ADB_PATH_DEFAULT = r"C:\Android\platform-tools\adb.exe"
-try:
-    ADB_PATH = CONFIG.get("adb", {}).get("adb_path", ADB_PATH_DEFAULT)
-except Exception:
-    ADB_PATH = ADB_PATH_DEFAULT
+ADB_PATH_DEFAULT = "adb"
+
+
+def resolve_adb_path() -> str:
+    env_value = os.environ.get("ADB_PATH", "").strip()
+    if env_value:
+        return env_value
+
+    try:
+        config_value = str(CONFIG.get("adb", {}).get("adb_path", ADB_PATH_DEFAULT)).strip()
+    except Exception:
+        config_value = ADB_PATH_DEFAULT
+    return config_value or ADB_PATH_DEFAULT
+
+
+ADB_PATH = resolve_adb_path()
 
 
 USER_AGENTS = [
@@ -85,46 +97,51 @@ REAL_DEVICES = [
 ]
 
 
-def run_adb_command(command: str) -> None:
+def run_adb_command(command: str, udid: str | None = None, adb_path: str | None = None) -> None:
     """Run a single shell command on the connected Android device via ADB.
 
     The command is executed inside an interactive "adb shell" with "su"
     to obtain root privileges. Raises RuntimeError on failure.
     """
+    resolved_adb_path = adb_path or ADB_PATH
+    adb_prefix = [resolved_adb_path]
+    if udid:
+        adb_prefix.extend(["-s", udid])
+    adb_prefix.append("shell")
+
     try:
         process = subprocess.Popen(
-            f'"{ADB_PATH}" shell',
+            adb_prefix,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            shell=True
         )
-        # Отправляем команды построчно
+        # Send shell commands line-by-line.
         commands = [
-            'su',
+            "su",
             command,
-            'exit',
-            'exit'
+            "exit",
+            "exit",
         ]
 
         try:
-            stdout, stderr = process.communicate('\n'.join(commands), timeout=10)
-            if stderr:
-                print(f"Ошибка смены IMEI: {stderr}")
+            stdout, stderr = process.communicate("\n".join(commands), timeout=10)
+            if stderr and process.returncode not in (0, None):
+                logging.error("ADB command failed: %s", stderr.strip())
                 raise subprocess.CalledProcessError(process.returncode, commands, stderr=stderr)
 
-            logging.info(f"ADB command ran: {stdout}")
+            logging.info("ADB command ran: %s", stdout.strip())
         except subprocess.TimeoutExpired as e:
-            logging.error(f"Ошибка ADB команды: {e}")
+            logging.error("ADB command timeout: %s", e)
             process.kill()
             raise
     except subprocess.CalledProcessError as e:
-        logging.error(f"Ошибка ADB команды: {e.stderr}")
-        raise RuntimeError(f"Ошибка ADB команды: {e.stderr}")
+        logging.error("ADB command error: %s", e.stderr)
+        raise RuntimeError(f"ADB command error: {e.stderr}")
 
 
-def connect_adb(udid: str, max_attempts: int = 3) -> bool:
+def connect_adb(udid: str, max_attempts: int = 3, adb_path: str | None = None) -> bool:
     """Try to establish an ADB connection to the given device.
 
     The function will run ``adb connect`` up to ``max_attempts`` times and
@@ -134,22 +151,40 @@ def connect_adb(udid: str, max_attempts: int = 3) -> bool:
     :param max_attempts: Maximum number of connection attempts.
     :return: True if the device responds as online, False otherwise.
     """
+    resolved_adb_path = adb_path or ADB_PATH
+
     for attempt in range(1, max_attempts + 1):
-        print(f"Attempt {attempt}/{max_attempts} to connect to {udid}")
-        adb_command = f'"{ADB_PATH}" connect {udid}'
-        process = subprocess.Popen(adb_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-        output, error = process.communicate()
-        if error:
-            print(f"Error connecting to ADB for {udid}: {error.decode()}")
+        logging.info("Attempt %s/%s to connect to %s", attempt, max_attempts, udid)
+        connect_result = subprocess.run(
+            [resolved_adb_path, "connect", udid],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if connect_result.returncode != 0:
+            logging.warning(
+                "Error connecting to ADB for %s: %s",
+                udid,
+                (connect_result.stderr or connect_result.stdout).strip(),
+            )
         else:
-            print(f"ADB connected to {udid}: {output.decode()}")
-            adb_command = f'"{ADB_PATH}" -s {udid} shell echo online'
-            process = subprocess.Popen(adb_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-            output, error = process.communicate()
-            if not error and "online" in output.decode().strip():
+            logging.info(
+                "ADB connect response for %s: %s",
+                udid,
+                connect_result.stdout.strip(),
+            )
+            probe_result = subprocess.run(
+                [resolved_adb_path, "-s", udid, "shell", "echo", "online"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if probe_result.returncode == 0 and "online" in probe_result.stdout.strip():
                 return True
+
         time.sleep(2)
-    print(f"Failed to connect to {udid} after {max_attempts} attempts")
+
+    logging.error("Failed to connect to %s after %s attempts", udid, max_attempts)
     return False
 
 
@@ -224,7 +259,7 @@ def get_device_info(udid: str) -> dict:
 
 
 def generate_samsung_imei():
-    tac = "35" + ''.join(random.choice('0123456789') for _ in range(6))  # TAC для Samsung
+    tac = "35" + ''.join(random.choice('0123456789') for _ in range(6))  # TAC РґР»СЏ Samsung
     serial = ''.join(random.choice('0123456789') for _ in range(6))
     temp = tac + serial
     sum_odd = sum(int(temp[i]) for i in range(0, len(temp), 2))
@@ -234,7 +269,7 @@ def generate_samsung_imei():
 
 
 def generate_samsung_mac():
-    oui_list = ["00:03:7A", "00:0D:6F", "00:12:FB", "00:1D:6A"]  # Реальные OUI Samsung
+    oui_list = ["00:03:7A", "00:0D:6F", "00:12:FB", "00:1D:6A"]  # Р РµР°Р»СЊРЅС‹Рµ OUI Samsung
     oui = random.choice(oui_list)
     nic = ':'.join('{:02x}'.format(random.randint(0, 255)) for _ in range(3))
     return oui + ":" + nic
@@ -255,11 +290,11 @@ def generate_boottime_sequence(now=None, shift=None):
 
 def change_imei():
     try:
-        # Генерация нового IMEI
+        # Р“РµРЅРµСЂР°С†РёСЏ РЅРѕРІРѕРіРѕ IMEI
         new_imei = generate_samsung_imei()
 
         process = subprocess.Popen(
-            "adb shell",
+            [ADB_PATH, "shell"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -291,13 +326,13 @@ def change_imei():
 
         try:
             stdout, stderr = process.communicate('\n'.join(commands), timeout=30)
-            if stderr:
-                print(f"Ошибка смены IMEI: {stderr}")
+            if stderr and process.returncode not in (0, None):
+                logging.error("IMEI change failed: %s", stderr.strip())
                 raise subprocess.CalledProcessError(process.returncode, commands, stderr=stderr)
 
-            print(f'New IMEI generated: {new_imei}')
+            logging.info("New IMEI generated: %s", new_imei)
         except subprocess.TimeoutExpired as e:
-            print(f"Ошибка смены IMEI: {e}")
+            logging.error("IMEI change timeout: %s", e)
             process.kill()
             raise
     except subprocess.CalledProcessError as e:
@@ -359,7 +394,7 @@ def change_setting(level, setting_name, value, su=False):
     try:
         if su:
             process = subprocess.Popen(
-                "adb shell",
+                [ADB_PATH, "shell"],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -374,7 +409,7 @@ def change_setting(level, setting_name, value, su=False):
             stdout, stderr = process.communicate("\n".join(commands), timeout=10)
         else:
             process = subprocess.Popen(
-                ["adb", "shell", "settings", "put", level, setting_name, str(value)],
+                [ADB_PATH, "shell", "settings", "put", level, setting_name, str(value)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True
@@ -398,7 +433,7 @@ def change_prop(setting_name, value, su=False):
     try:
         if su:
             process = subprocess.Popen(
-                "adb shell",
+                [ADB_PATH, "shell"],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -413,7 +448,7 @@ def change_prop(setting_name, value, su=False):
             stdout, stderr = process.communicate("\n".join(commands), timeout=10)
         else:
             process = subprocess.Popen(
-                ["adb", "shell", "setprop", setting_name, str(value)],
+                [ADB_PATH, "shell", "setprop", setting_name, str(value)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True
@@ -438,7 +473,7 @@ def set_random_timezone():
         timezones = ["America/New_York", "America/Los_Angeles", "America/Chicago"]
         new_timezone = random.choice(timezones)
         process = subprocess.Popen(
-            "adb shell",
+            [ADB_PATH, "shell"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -461,7 +496,7 @@ def set_random_timezone():
 
 def compare_emulator_settings(udid1, udid2):
     try:
-        adb_path = r"C:\Android\platform-tools\adb.exe"
+        adb_path = ADB_PATH
 
         def get_settings(udid, levels=('secure', 'global', 'system')):
             settings = {}
@@ -495,18 +530,23 @@ def compare_emulator_settings(udid1, udid2):
 
         for level, diffs in differences.items():
             if diffs:
-                print(f"Различия в {level} настройках:")
+                logging.info("Differences found in %s settings (%s keys)", level, len(diffs))
                 for key, values in diffs.items():
-                    print(f"  {key}:")
-                    print(f"    {udid1}: {values['udid1']}")
-                    print(f"    {udid2}: {values['udid2']}")
+                    logging.info(
+                        "Setting %s differs: %s=%r | %s=%r",
+                        key,
+                        udid1,
+                        values["udid1"],
+                        udid2,
+                        values["udid2"],
+                    )
 
         logging.info(
-            f"Сравнение настроек для {udid1} и {udid2} завершено... Найдено различий: {sum(len(d) for d in differences.values())}")
+            f"РЎСЂР°РІРЅРµРЅРёРµ РЅР°СЃС‚СЂРѕРµРє РґР»СЏ {udid1} Рё {udid2} Р·Р°РІРµСЂС€РµРЅРѕ... РќР°Р№РґРµРЅРѕ СЂР°Р·Р»РёС‡РёР№: {sum(len(d) for d in differences.values())}")
         return differences
 
     except Exception as e:
-        logging.error(f"Ошибка при сравнении настроек: {e}")
+        logging.error(f"РћС€РёР±РєР° РїСЂРё СЃСЂР°РІРЅРµРЅРёРё РЅР°СЃС‚СЂРѕРµРє: {e}")
         return {}
 
 
@@ -516,7 +556,7 @@ def generate_stable_secret():
 
 
 def generate_mac_address():
-    # Создаем список из 6 случайных шестнадцатеричных чисел (0-255)
+    # РЎРѕР·РґР°РµРј СЃРїРёСЃРѕРє РёР· 6 СЃР»СѓС‡Р°Р№РЅС‹С… С€РµСЃС‚РЅР°РґС†Р°С‚РµСЂРёС‡РЅС‹С… С‡РёСЃРµР» (0-255)
     mac_parts = [random.randint(0x00, 0xFF) for _ in range(6)]
     mac_address = ":".join(f"{part:02X}" for part in mac_parts)
     return mac_address
@@ -601,7 +641,7 @@ def reset_data(udid: str, app_for_clear: str, prefix: str | None = None) -> bool
         # Reset Advertising ID
         subprocess.run(adb_prefix + ["shell", "settings", "delete", "secure", "advertising_id"], check=True)
         logging.info("Advertising ID reset successfully")
-        # Сброс Advertising ID
+        # РЎР±СЂРѕСЃ Advertising ID
         subprocess.run(adb_prefix + ["shell", "pm", "clear", "com.google.android.gms"], check=True)
         logging.info("Google Play Services data cleared successfully")
 
@@ -642,3 +682,4 @@ def reset_data(udid: str, app_for_clear: str, prefix: str | None = None) -> bool
 
 if __name__ == '__main__':
     reset_data('XED4C18515000819', 'org.telegram.messenger')
+

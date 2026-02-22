@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # Наш регистратор
+  regger:
+    build: .
+    container_name: tg_regger_app
+    # Прокидываем тома, чтобы сессии и логи сохранялись на сервере, а не внутри контейнера
+    volumes:
+      - ./sessions:/app/sessions
+      - ./logs:/app/logs
+      - ./debug:/app/debug
+      - ./config.yaml:/app/config.yaml
+      - ./data:/app/data
+    networks:
+      - tg_net
+    # Скрипт начнет работу только после того, как поднимутся эмуляторы
+    depends_on:
+      - android_1
+      - android_2
+    # Пример команды запуска (можно менять при старте)
+    command: ["--count", "20", "--threads", "2"]
+
+  # Первый эмулятор
+  android_1:
+    image: redroid/redroid:11.0.0-latest
+    container_name: android_1
+    privileged: true
+    networks:
+      - tg_net
+    expose:
+      - "5555"
+    command:
+      - androidboot.redroid_width=720
+      - androidboot.redroid_height=1280
+      - androidboot.redroid_fps=30
+    restart: always
+
+  # Второй эмулятор
+  android_2:
+    image: redroid/redroid:11.0.0-latest
+    container_name: android_2
+    privileged: true
+    networks:
+      - tg_net
+    expose:
+      - "5555"
+    command:
+      - androidboot.redroid_width=720
+      - androidboot.redroid_height=1280
+      - androidboot.redroid_fps=30
+    restart: always
+
+networks:
+  tg_net:
+    driver: bridge
