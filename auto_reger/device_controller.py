@@ -81,12 +81,51 @@ class DeviceController:
         cmd = [self.adb_path, "-s", self.device_id, *args]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
+        offline_error = f"{result.stdout}\n{result.stderr}".lower()
+        if result.returncode != 0 and "device offline" in offline_error:
+            LOGGER.warning("ADB device %s is offline. Reconnecting and retrying command: %s", self.device_id, " ".join(cmd))
+            if ":" in self.device_id:
+                self._connect_network_device(check=False, timeout=20, log_attempt=False)
+            time.sleep(1.0)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
         if check and result.returncode != 0:
             raise RuntimeError(
                 "ADB command failed: {} | stdout={!r} stderr={!r}".format(
                     " ".join(cmd),
                     (result.stdout or "").strip(),
                     (result.stderr or "").strip(),
+                )
+            )
+        return result
+
+    def _connect_network_device(
+        self,
+        *,
+        check: bool = True,
+        timeout: int = 20,
+        log_attempt: bool = True,
+    ) -> subprocess.CompletedProcess[str]:
+        """
+        Connect ``host:port`` devices via ``adb connect``.
+        """
+        if ":" not in self.device_id:
+            raise RuntimeError(f"`adb connect` is only applicable for network devices: {self.device_id}")
+
+        if log_attempt:
+            LOGGER.info("Connecting to ADB device %s", self.device_id)
+
+        result = subprocess.run(
+            [self.adb_path, "connect", self.device_id],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if check and result.returncode != 0:
+            raise RuntimeError(
+                "Failed to connect ADB device {}: {}".format(
+                    self.device_id,
+                    (result.stderr or result.stdout or "").strip(),
                 )
             )
         return result
@@ -107,7 +146,25 @@ class DeviceController:
         self._root_mode = None
 
         self._run_adb("root", check=False, timeout=20)
-        time.sleep(0.8)
+        time.sleep(2.0)
+
+        LOGGER.info("Waiting for device to reconnect after adb root...")
+        reconnect_deadline = time.monotonic() + 20.0
+        reconnected = False
+        while time.monotonic() < reconnect_deadline:
+            if ":" in self.device_id:
+                self._connect_network_device(check=False, timeout=10, log_attempt=False)
+
+            state_result = self._run_adb("get-state", check=False, timeout=5)
+            state = state_result.stdout.strip().lower()
+            if state_result.returncode == 0 and state == "device":
+                reconnected = True
+                break
+
+            time.sleep(1.0)
+
+        if not reconnected:
+            LOGGER.warning("Device %s did not reconnect to `device` state after adb root", self.device_id)
 
         adbd_probe = self._run_adb("shell", "id", "-u", check=False, timeout=10)
         if adbd_probe.returncode == 0 and adbd_probe.stdout.strip() == "0":
@@ -154,20 +211,21 @@ class DeviceController:
         USB serials are left untouched.
         """
         if ":" in self.device_id:
-            LOGGER.info("Connecting to ADB device %s", self.device_id)
-            result = subprocess.run(
-                [self.adb_path, "connect", self.device_id],
-                capture_output=True,
-                text=True,
-                timeout=20,
-            )
-            if result.returncode != 0:
-                raise RuntimeError(
-                    "Failed to connect ADB device {}: {}".format(
-                        self.device_id,
-                        (result.stderr or result.stdout or "").strip(),
-                    )
-                )
+            initial_state_result = self._run_adb("get-state", check=False, timeout=10)
+            initial_state = initial_state_result.stdout.strip().lower()
+            if not (initial_state_result.returncode == 0 and initial_state == "device"):
+                self._connect_network_device(check=True, timeout=20, log_attempt=True)
+
+            stable_deadline = time.monotonic() + 10.0
+            while time.monotonic() < stable_deadline:
+                state_result = self._run_adb("get-state", check=False, timeout=5)
+                state = state_result.stdout.strip().lower()
+                if state_result.returncode == 0 and state == "device":
+                    break
+                self._connect_network_device(check=False, timeout=10, log_attempt=False)
+                time.sleep(1.0)
+            else:
+                raise RuntimeError(f"ADB device {self.device_id} failed to reach stable `device` state")
         self._ensure_root_access()
 
     def is_ready(self) -> bool:
