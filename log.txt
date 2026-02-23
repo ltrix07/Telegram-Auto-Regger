@@ -11,3 +11,24 @@
 2026-02-23 21:11:30,699 - INFO - proxy_api.py:210 - _create_list() - Creating resident list for country=US with 1000 ports and rotation=1200s (whitelist=85.198.252.111).
 2026-02-23 21:11:34,606 - INFO - proxy_api.py:221 - _create_list() - Resident list created for country=US, list_id=19743186.
 2026-02-23 21:11:34,606 - INFO - proxy_api.py:182 - _ensure_proxies_loaded() - Downloading resident proxies list id=19743186 for country=US.
+2026-02-23 21:26:26,341 - INFO - proxy_api.py:179 - _ensure_proxies_loaded() - Resident proxy list not found for country=US. Creating a new list.
+2026-02-23 21:26:26,806 - INFO - proxy_api.py:257 - _create_list() - Creating resident list for country=US with 1000 ports and rotation=1200s (whitelist=85.198.252.111).
+2026-02-23 21:34:18,415 - INFO - proxy_api.py:170 - _ensure_proxies_loaded() - Resident proxy list not found for country=US. Creating a new list.
+2026-02-23 21:34:18,415 - INFO - proxy_api.py:267 - _create_list() - Creating resident list for country=US with 1000 ports and rotation=1200s.
+2026-02-23 21:34:18,818 - ERROR - proxy_api.py:174 - _ensure_proxies_loaded() - Failed to create resident list for country=US. This may happen due to account limits or duplicate resources.
+Traceback (most recent call last):
+  File "C:\Users\Владимир\PycharmProjects\Telegrm-Auto-Regger\auto_reger\proxy_api.py", line 172, in _ensure_proxies_loaded
+    list_id = self._create_list(resolved_code)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Владимир\PycharmProjects\Telegrm-Auto-Regger\auto_reger\proxy_api.py", line 271, in _create_list
+    response_payload = self._request_json("POST", "/resident/list/add", json_body=payload)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Владимир\PycharmProjects\Telegrm-Auto-Regger\auto_reger\proxy_api.py", line 298, in _request_json
+    self._raise_api_payload_error(parsed, endpoint)
+  File "C:\Users\Владимир\PycharmProjects\Telegrm-Auto-Regger\auto_reger\proxy_api.py", line 380, in _raise_api_payload_error
+    raise RuntimeError(f"Proxy-Seller API returned error payload on {endpoint}: {payload!r}")
+RuntimeError: Proxy-Seller API returned error payload on /resident/list/add: {'status': 'error', 'data': None, 'errors': [{'message': 'in_array(): Argument #2 ($haystack) must be of type array, null given', 'code': 0, 'customData': None}]}
+2026-02-23 21:36:48,772 - INFO - proxy_api.py:170 - _ensure_proxies_loaded() - Resident proxy list not found for country=US. Creating a new list.
+2026-02-23 21:36:48,772 - INFO - proxy_api.py:268 - _create_list() - Creating resident list for country=US with 1000 ports and rotation=1200s.
+2026-02-23 21:36:50,701 - INFO - proxy_api.py:278 - _create_list() - Resident list created for country=US, list_id=19743371.
+2026-02-23 21:36:51,549 - INFO - proxy_api.py:250 - _ensure_proxies_loaded() - Сгенерировано 1000 портов для res.proxy-seller.com (country=US, list_id=19743371).

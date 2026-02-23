@@ -696,6 +696,8 @@ def run_single_cycle(
 
         proxy_host = str(proxy_data.get("ip", "")).strip()
         proxy_port = str(proxy_data.get("port", "")).strip()
+        proxy_user = str(proxy_data.get("user", "")).strip()
+        proxy_password = str(proxy_data.get("pass", "")).strip()
         proxy_type = str(proxy_data.get("type", "")).strip().lower()
         if not proxy_host or not proxy_port.isdigit():
             LOGGER.error(
@@ -714,11 +716,16 @@ def run_single_cycle(
             "type": "socks5",
             "host": proxy_host,
             "port": int(proxy_port),
-            "username": "",
-            "password": "",
+            "username": proxy_user,
+            "password": proxy_password,
         }
 
-        if not device.set_telegram_proxy_via_intent(proxy_host, proxy_port):
+        if not device.set_telegram_proxy_via_intent(
+            proxy_host,
+            proxy_port,
+            proxy_user,
+            proxy_password,
+        ):
             raise RuntimeError(
                 f"Telegram proxy intent failed for {proxy_host}:{proxy_port} on {device_id}"
             )

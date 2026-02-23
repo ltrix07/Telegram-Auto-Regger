@@ -54,19 +54,6 @@ class ProxyApi:
         self._geo_countries_cache: list[dict[str, Any]] | None = None
         self._geo_warning_shown = False
 
-    def _get_my_ip(self) -> str:
-        """Resolve current server external IP for proxy list whitelist."""
-        try:
-            response = requests.get("https://api.ipify.org", timeout=5)
-            response.raise_for_status()
-        except requests.RequestException as exc:
-            raise RuntimeError(f"Failed to resolve server IP via ipify: {exc}") from exc
-
-        ip_value = response.text.strip()
-        if not ip_value:
-            raise RuntimeError("ipify returned an empty IP response.")
-        return ip_value
-
     @staticmethod
     def _normalize_country_token(value: str) -> str:
         return "".join(ch for ch in str(value or "").upper().strip() if ch.isalnum())
@@ -160,57 +147,127 @@ class ProxyApi:
             return {
                 "ip": str(proxy["ip"]),
                 "port": str(proxy["port"]),
+                "user": str(proxy.get("user", "")),
+                "pass": str(proxy.get("pass", "")),
                 "type": "socks5",
             }
 
     def _ensure_proxies_loaded(self, country: str) -> None:
-        """Load existing resident list by country or create a new one, then download proxies."""
+        """Load or create resident list by country and generate backconnect proxy ports."""
         if not self.api_key:
             raise RuntimeError("proxy_api.key is empty in config.yaml.")
         if not self.base_url:
             raise RuntimeError("Proxy-Seller Personal API base_url is empty.")
 
+        resolved_code = self._normalize_country_token(country)
+        if not resolved_code:
+            raise RuntimeError(f"Invalid country code for resident list lookup: {country!r}")
+
         lists_payload = self._request_json("GET", "/resident/lists")
-        list_id = self._find_list_id(lists_payload, country)
+        target_list = self._find_list_by_country(lists_payload, resolved_code)
 
-        if not list_id:
-            LOGGER.info("Resident proxy list not found for country=%s. Creating a new list.", country)
-            list_id = self._create_list(country)
+        if not target_list:
+            LOGGER.info("Resident proxy list not found for country=%s. Creating a new list.", resolved_code)
+            try:
+                list_id = self._create_list(resolved_code)
+            except Exception as exc:
+                LOGGER.exception(
+                    "Failed to create resident list for country=%s. "
+                    "This may happen due to account limits or duplicate resources.",
+                    resolved_code,
+                )
+                refreshed_payload = self._request_json("GET", "/resident/lists")
+                target_list = self._find_list_by_country(refreshed_payload, resolved_code)
+                if not target_list:
+                    raise RuntimeError(
+                        f"Failed to create resident list for country={resolved_code}. "
+                        "No existing list was found after create failure."
+                    ) from exc
+                list_id = self._extract_list_id(target_list)
+                LOGGER.info(
+                    "Using existing resident list id=%s for country=%s after create failure.",
+                    list_id or "unknown",
+                    resolved_code,
+                )
+            else:
+                refreshed_payload = self._request_json("GET", "/resident/lists")
+                target_list = self._find_list_by_id(refreshed_payload, list_id) or self._find_list_by_country(
+                    refreshed_payload,
+                    resolved_code,
+                )
         else:
-            LOGGER.info("Using existing resident list id=%s for country=%s.", list_id, country)
+            list_id = self._extract_list_id(target_list)
+            LOGGER.info("Using existing resident list id=%s for country=%s.", list_id, resolved_code)
 
-        LOGGER.info("Downloading resident proxies list id=%s for country=%s.", list_id, country)
-        download_text = self._request_text("GET", f"/resident/list/{list_id}/download")
-        parsed_proxies = self._parse_downloaded_proxies(download_text)
-        if not parsed_proxies:
-            raise RuntimeError(f"Downloaded proxy list is empty for list_id={list_id}, country={country}.")
+        if not target_list:
+            raise RuntimeError(f"Resident proxy list metadata not found for country={resolved_code}.")
 
-        self.proxies_cache = parsed_proxies
+        list_id = self._extract_list_id(target_list)
+        login = str(target_list.get("login", "")).strip()
+        password = str(target_list.get("password", "")).strip()
+        export_data = target_list.get("export")
+        ports_raw = export_data.get("ports", 1000) if isinstance(export_data, dict) else 1000
+        try:
+            ports_count = int(ports_raw)
+        except (TypeError, ValueError):
+            LOGGER.warning(
+                "Invalid ports count %r for list_id=%s country=%s. Falling back to 1000.",
+                ports_raw,
+                list_id or "unknown",
+                resolved_code,
+            )
+            ports_count = 1000
+        if ports_count < 1:
+            LOGGER.warning(
+                "Non-positive ports count %s for list_id=%s country=%s. Falling back to 1000.",
+                ports_count,
+                list_id or "unknown",
+                resolved_code,
+            )
+            ports_count = 1000
+        if not login or not password:
+            raise RuntimeError(
+                f"Resident list credentials are missing for list_id={list_id or 'unknown'}, country={resolved_code}."
+            )
+
+        host = "res.proxy-seller.com"
+        self.proxies_cache = []
+        for i in range(ports_count):
+            port = 10000 + i
+            self.proxies_cache.append(
+                {
+                    "ip": host,
+                    "port": str(port),
+                    "user": login,
+                    "pass": password,
+                    "type": "socks5",
+                }
+            )
+
         self.current_index = 0
         self.last_reset_time = time.time()
-        self._loaded_country = country
+        self._loaded_country = resolved_code
         LOGGER.info(
-            "Loaded %s resident proxies for country=%s (list_id=%s).",
-            len(self.proxies_cache),
-            country,
-            list_id,
+            "Сгенерировано %s портов для %s (country=%s, list_id=%s).",
+            ports_count,
+            host,
+            resolved_code,
+            list_id or "unknown",
         )
 
     def _create_list(self, country: str) -> str:
         """Create a resident proxy list with fixed 1000 ports and 1200s rotation."""
-        whitelist_ip = self._get_my_ip()
         payload = {
             "title": f"AutoReger {country}",
-            "whitelist": whitelist_ip,
+            "whitelist": "",
             "geo": {"country": country},
             "export": {"ports": 1000, "ext": "txt"},
             "rotation": 1200,
         }
 
         LOGGER.info(
-            "Creating resident list for country=%s with 1000 ports and rotation=1200s (whitelist=%s).",
+            "Creating resident list for country=%s with 1000 ports and rotation=1200s.",
             country,
-            whitelist_ip,
         )
         response_payload = self._request_json("POST", "/resident/list/add", json_body=payload)
         list_id = self._extract_list_id(response_payload)
@@ -340,22 +397,32 @@ class ProxyApi:
             if isinstance(candidate, list):
                 return [item for item in candidate if isinstance(item, dict)]
             if isinstance(candidate, dict):
-                nested = candidate.get("lists")
-                if isinstance(nested, list):
-                    return [item for item in nested if isinstance(item, dict)]
+                for inner_key in ("items", "lists", "data"):
+                    nested = candidate.get(inner_key)
+                    if isinstance(nested, list):
+                        return [item for item in nested if isinstance(item, dict)]
         return []
 
-    def _find_list_id(self, payload: Any, country: str) -> str:
+    def _find_list_by_country(self, payload: Any, country: str) -> dict[str, Any] | None:
+        resolved_code = self._normalize_country_token(country)
         for item in self._extract_lists(payload):
-            geo_data = item.get("geo")
+            geo_data = item.get("geo", {})
             if not isinstance(geo_data, dict):
                 continue
-            if str(geo_data.get("country", "")) != country:
+            item_country = self._normalize_country_token(str(geo_data.get("country", "")).strip())
+            if not item_country or item_country != resolved_code:
                 continue
-            candidate_id = self._extract_list_id(item)
-            if candidate_id:
-                return candidate_id
-        return ""
+            return item
+        return None
+
+    def _find_list_by_id(self, payload: Any, list_id: str) -> dict[str, Any] | None:
+        normalized_id = str(list_id or "").strip()
+        if not normalized_id:
+            return None
+        for item in self._extract_lists(payload):
+            if self._extract_list_id(item) == normalized_id:
+                return item
+        return None
 
     @staticmethod
     def _extract_list_id(payload: Any) -> str:

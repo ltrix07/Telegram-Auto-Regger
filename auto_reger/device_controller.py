@@ -8,6 +8,7 @@ import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Tuple
+from urllib.parse import quote
 
 from .utils import PROJECT_ROOT
 
@@ -307,7 +308,13 @@ class DeviceController:
             f"Failed to set proxy on {self.device_id}. Expected={target_proxy!r}, got={current_value!r}"
         )
 
-    def set_telegram_proxy_via_intent(self, ip: str, port: str) -> bool:
+    def set_telegram_proxy_via_intent(
+        self,
+        ip: str,
+        port: str,
+        user: str = "",
+        password: str = "",
+    ) -> bool:
         """
         Open Telegram SOCKS proxy deep-link and trigger system proxy-enable popup.
 
@@ -330,6 +337,10 @@ class DeviceController:
             return False
 
         deep_link = f"tg://socks?server={host}&port={port_value}"
+        username = str(user or "").strip()
+        user_password = str(password or "").strip()
+        if username and user_password:
+            deep_link += f"&user={quote(username, safe='')}&pass={quote(user_password, safe='')}"
         result = self._run_adb(
             "shell",
             "am",
@@ -356,10 +367,11 @@ class DeviceController:
             return False
 
         LOGGER.info(
-            "Telegram proxy intent opened on %s for %s:%s",
+            "Telegram proxy intent opened on %s for %s:%s (auth=%s)",
             self.device_id,
             host,
             port_value,
+            "yes" if username and user_password else "no",
         )
         return True
 
