@@ -246,8 +246,18 @@ class ProxyApi:
             country,
         )
         response_payload = self._request_json("POST", "/resident/list/add", json_body=payload)
-        parsed_lists = self._extract_lists(response_payload)
-        created_list = parsed_lists[0] if parsed_lists else {}
+        created_list: dict[str, Any] = {}
+        if isinstance(response_payload, dict):
+            data_payload = response_payload.get("data")
+            if isinstance(data_payload, dict):
+                created_list = data_payload
+            elif isinstance(data_payload, list):
+                created_list = next((item for item in data_payload if isinstance(item, dict)), {})
+
+        if not created_list:
+            parsed_lists = self._extract_lists(response_payload)
+            created_list = parsed_lists[0] if parsed_lists else {}
+
         list_id = self._extract_list_id(created_list) or self._extract_list_id(response_payload)
         if not list_id:
             raise RuntimeError(
@@ -386,39 +396,53 @@ class ProxyApi:
             )
 
     def _extract_lists(self, payload: Any) -> list[dict[str, Any]]:
+        if isinstance(payload, dict):
+            data_payload = payload.get("data")
+            # Current API format: {"status": "success", "data": [ ... ]}.
+            if isinstance(data_payload, list):
+                return [item for item in data_payload if isinstance(item, dict)]
+            # Backward compatibility: {"data": {"items": [ ... ]}}.
+            if isinstance(data_payload, dict):
+                items = data_payload.get("items")
+                if isinstance(items, list):
+                    return [item for item in items if isinstance(item, dict)]
+                if self._extract_list_id(data_payload):
+                    return [data_payload]
+
+            for key in ("items", "lists", "result"):
+                candidate = payload.get(key)
+                if isinstance(candidate, list):
+                    return [item for item in candidate if isinstance(item, dict)]
+                if isinstance(candidate, dict) and self._extract_list_id(candidate):
+                    return [candidate]
+
         if isinstance(payload, list):
             return [item for item in payload if isinstance(item, dict)]
-
-        if not isinstance(payload, dict):
-            return []
-
-        data = payload.get("data")
-        if isinstance(data, list):
-            return [item for item in data if isinstance(item, dict)]
-        if isinstance(data, dict):
-            items = data.get("items")
-            if isinstance(items, list):
-                return [item for item in items if isinstance(item, dict)]
-            if self._extract_list_id(data):
-                return [data]
-
-        for key in ("items", "lists", "result"):
-            candidate = payload.get(key)
-            if isinstance(candidate, list):
-                return [item for item in candidate if isinstance(item, dict)]
-            if isinstance(candidate, dict) and self._extract_list_id(candidate):
-                return [candidate]
         return []
 
     def _find_list_by_country(self, payload: Any, country: str) -> dict[str, Any] | None:
         resolved_code = self._normalize_country_token(country)
-        for item in self._extract_lists(payload):
+        parsed_lists = self._extract_lists(payload)
+        LOGGER.debug("Proxy-Seller lists parsed from API: count=%s", len(parsed_lists))
+        for item in parsed_lists:
             item_country = self._extract_item_country_code(item)
             if item_country and item_country == resolved_code:
                 return item
         return None
 
     def _extract_item_country_code(self, item: dict[str, Any]) -> str:
+        geo_payload = item.get("geo")
+        if isinstance(geo_payload, list) and geo_payload:
+            first_geo = geo_payload[0]
+            if isinstance(first_geo, dict):
+                country_from_geo = self._normalize_country_token(first_geo.get("country", ""))
+                if country_from_geo:
+                    return country_from_geo
+        elif isinstance(geo_payload, dict):
+            country_from_geo = self._normalize_country_token(geo_payload.get("country", ""))
+            if country_from_geo:
+                return country_from_geo
+
         def extract_from_value(value: Any) -> str:
             if isinstance(value, str):
                 return self._normalize_country_token(value)

@@ -382,7 +382,7 @@ class DeviceController:
         )
         return True
 
-    def enable_telegram_proxy_popup(self, timeout: float = 7.0, poll_interval: float = 0.4) -> str:
+    def enable_telegram_proxy_popup(self, timeout: float = 15.0, poll_interval: float = 0.4) -> str:
         """
         Wait for Telegram proxy confirmation popup and tap its positive action.
 
@@ -395,6 +395,7 @@ class DeviceController:
             if str(candidate).strip()
         ]
         proxy_enable_resource_ids = self._proxy_enable_resource_ids()
+        detected_texts: set[str] = set()
         deadline = time.time() + max(timeout, 0.5)
         while time.time() < deadline:
             xml_text = self._dump_ui_xml()
@@ -404,6 +405,11 @@ class DeviceController:
                 LOGGER.debug("Proxy popup XML parse failed on %s", self.device_id, exc_info=True)
                 time.sleep(max(poll_interval, 0.1))
                 continue
+
+            for text_candidate in self._extract_text_candidates(xml_text):
+                normalized_text = str(text_candidate).strip()
+                if normalized_text:
+                    detected_texts.add(normalized_text)
 
             # Prefer stable resource-id selectors when available.
             for resource_id in proxy_enable_resource_ids:
@@ -468,6 +474,18 @@ class DeviceController:
                 LOGGER.debug("Proxy popup text scan failed on %s", self.device_id, exc_info=True)
 
             time.sleep(max(poll_interval, 0.1))
+
+        if detected_texts:
+            LOGGER.warning(
+                "Telegram proxy popup timeout on %s. Screen texts: %s",
+                self.device_id,
+                sorted(detected_texts),
+            )
+        else:
+            LOGGER.warning(
+                "Telegram proxy popup timeout on %s. Screen texts were not extracted.",
+                self.device_id,
+            )
 
         raise TimeoutError(
             f"Telegram proxy enable popup did not appear on {self.device_id} within {timeout:.1f}s"
