@@ -387,20 +387,16 @@ class ProxyApi:
         if not isinstance(payload, dict):
             return []
 
-        candidates: list[Any] = [
-            payload.get("data"),
-            payload.get("result"),
-            payload.get("items"),
-            payload.get("lists"),
-        ]
-        for candidate in candidates:
+        data = payload.get("data", {})
+        if isinstance(data, dict):
+            items = data.get("items")
+            if isinstance(items, list):
+                return [item for item in items if isinstance(item, dict)]
+
+        for key in ("items", "lists", "result"):
+            candidate = payload.get(key)
             if isinstance(candidate, list):
                 return [item for item in candidate if isinstance(item, dict)]
-            if isinstance(candidate, dict):
-                for inner_key in ("items", "lists", "data"):
-                    nested = candidate.get(inner_key)
-                    if isinstance(nested, list):
-                        return [item for item in nested if isinstance(item, dict)]
         return []
 
     def _find_list_by_country(self, payload: Any, country: str) -> dict[str, Any] | None:

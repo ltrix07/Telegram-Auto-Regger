@@ -348,14 +348,19 @@ class DeviceController:
         if username and user_password:
             deep_link += f"&user={quote(username, safe='')}&pass={quote(user_password, safe='')}"
 
-        safe_deep_link = f"'{deep_link}'" 
+        safe_deep_link = f"'{deep_link}'"
 
-        result = self._run_adb([
-            "shell", "am", "start", "-W", 
-            "-a", "android.intent.action.VIEW", 
-            "-d", safe_deep_link, 
-            self.telegram_package 
-        ])
+        result = self._run_adb(
+            "shell",
+            "am",
+            "start",
+            "-W",
+            "-a",
+            "android.intent.action.VIEW",
+            "-d",
+            safe_deep_link,
+            self.telegram_package,
+        )
         output = f"{result.stdout}\n{result.stderr}".lower()
         if result.returncode != 0 or "error:" in output or "exception" in output:
             LOGGER.error(
@@ -992,4 +997,3 @@ class DeviceController:
         Backward-compatible helper that returns current UI XML dump.
         """
         return self._dump_ui_xml()
-
