@@ -140,22 +140,71 @@ class TelegramRegistrator:
         }
 
     def _ensure_telegram_opened(self) -> None:
+        expected_package = (
+            str(getattr(self.device_controller, "telegram_package", "")).strip() or self.TELEGRAM_PACKAGE
+        )
         deadline = time.time() + self.UI_TIMEOUT_SECONDS
         current_package = ""
         while time.time() < deadline:
             current_package = self.device_controller.get_current_package()
-            if current_package == self.TELEGRAM_PACKAGE:
+            if current_package == expected_package:
                 return
             time.sleep(0.5)
         raise RegistrationError(
-            f"Telegram is not in foreground. Current package: {current_package or 'unknown'}"
+            "Telegram is not in foreground. "
+            f"Expected package: {expected_package}, current package: {current_package or 'unknown'}"
         )
 
+    def _telegram_packages_priority(self) -> tuple[str, ...]:
+        ordered = [
+            str(getattr(self.device_controller, "telegram_package", "")).strip(),
+            *getattr(DeviceController, "TELEGRAM_PACKAGE_CANDIDATES", ()),
+            self.TELEGRAM_PACKAGE,
+        ]
+        unique: list[str] = []
+        seen: set[str] = set()
+        for package_name in ordered:
+            normalized = str(package_name or "").strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            unique.append(normalized)
+        return tuple(unique)
+
+    def _selector_variants(self, selector: Dict[str, Any]) -> tuple[Dict[str, Any], ...]:
+        resource_id = selector.get("resourceId")
+        if not isinstance(resource_id, str):
+            return (selector,)
+        if not resource_id.startswith("org.telegram.messenger"):
+            return (selector,)
+        if ":id/" not in resource_id:
+            return (selector,)
+
+        _, _, resource_name = resource_id.partition(":id/")
+        if not resource_name:
+            return (selector,)
+
+        variants: list[Dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for package_name in self._telegram_packages_priority():
+            candidate_id = f"{package_name}:id/{resource_name}"
+            if candidate_id in seen_ids:
+                continue
+            seen_ids.add(candidate_id)
+            variant = dict(selector)
+            variant["resourceId"] = candidate_id
+            variants.append(variant)
+        return tuple(variants) if variants else (selector,)
+
     def _click(self, selector: Dict[str, Any], description: str, timeout: float = UI_TIMEOUT_SECONDS) -> None:
-        try:
-            self.device_controller.click(selector, timeout=timeout)
-        except Exception as exc:
-            raise RegistrationError(f"{description} was not found within 10 seconds.") from exc
+        last_error: Optional[Exception] = None
+        for selector_variant in self._selector_variants(selector):
+            try:
+                self.device_controller.click(selector_variant, timeout=timeout)
+                return
+            except Exception as exc:
+                last_error = exc
+        raise RegistrationError(f"{description} was not found within 10 seconds.") from last_error
 
     def _fill_text(
         self,
@@ -164,10 +213,14 @@ class TelegramRegistrator:
         description: str,
         timeout: float = UI_TIMEOUT_SECONDS,
     ) -> None:
-        try:
-            self.device_controller.fill_text(selector, text, timeout=timeout)
-        except Exception as exc:
-            raise RegistrationError(f"{description} was not found within 10 seconds.") from exc
+        last_error: Optional[Exception] = None
+        for selector_variant in self._selector_variants(selector):
+            try:
+                self.device_controller.fill_text(selector_variant, text, timeout=timeout)
+                return
+            except Exception as exc:
+                last_error = exc
+        raise RegistrationError(f"{description} was not found within 10 seconds.") from last_error
 
     def _click_any(self, selectors: Iterable[Dict[str, Any]], description: str) -> None:
         if self._try_click_any(selectors, timeout=self.UI_TIMEOUT_SECONDS):
@@ -181,14 +234,15 @@ class TelegramRegistrator:
 
         deadline = time.time() + timeout
         for selector in selectors_list:
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                break
-            try:
-                self.device_controller.click(selector, timeout=remaining)
-                return True
-            except Exception:
-                continue
+            for selector_variant in self._selector_variants(selector):
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    return False
+                try:
+                    self.device_controller.click(selector_variant, timeout=remaining)
+                    return True
+                except Exception:
+                    continue
         return False
 
     def _wait_and_enable_proxy_popup(self, timeout: float = PROXY_ENABLE_TIMEOUT_SECONDS) -> None:
@@ -199,14 +253,18 @@ class TelegramRegistrator:
         deadline = time.time() + max(timeout, 0.5)
         while time.time() < deadline:
             for selector in self.PROXY_ENABLE_SELECTORS:
-                remaining = deadline - time.time()
-                if remaining <= 0:
-                    break
-                try:
-                    self.device_controller.click(selector, timeout=min(1.0, max(remaining, 0.1)))
-                    return
-                except Exception:
-                    continue
+                for selector_variant in self._selector_variants(selector):
+                    remaining = deadline - time.time()
+                    if remaining <= 0:
+                        break
+                    try:
+                        self.device_controller.click(
+                            selector_variant,
+                            timeout=min(1.0, max(remaining, 0.1)),
+                        )
+                        return
+                    except Exception:
+                        continue
             time.sleep(0.2)
 
         raise TimeoutError("Telegram proxy popup button was not found within timeout.")

@@ -28,6 +28,11 @@ class DeviceController:
     """
 
     TELEGRAM_PACKAGE = "org.telegram.messenger"
+    TELEGRAM_PACKAGE_CANDIDATES = (
+        "org.telegram.messenger.web",
+        "org.telegram.messenger",
+        "org.telegram.messenger.beta",
+    )
     UI_DUMP_PATH = "/sdcard/window_dump.xml"
     PROXY_ENABLE_TEXT_CANDIDATES = (
         "enable proxy",
@@ -37,12 +42,11 @@ class DeviceController:
         "\u0432\u043a\u043b\u044e\u0447\u0438\u0442\u044c",
         "\u0432\u043a\u043b",
     )
-    PROXY_ENABLE_RESOURCE_IDS = (
-        "android:id/button1",
-        "org.telegram.messenger:id/button1",
-        "org.telegram.messenger:id/button_positive",
-        "org.telegram.messenger:id/positive_button",
-        "org.telegram.messenger:id/login_btn",
+    PROXY_ENABLE_RESOURCE_ID_SUFFIXES = (
+        "button1",
+        "button_positive",
+        "positive_button",
+        "login_btn",
     )
 
     def __init__(self, device_id: str, adb_path: str = "adb") -> None:
@@ -56,6 +60,7 @@ class DeviceController:
 
         self.device_id = normalized
         self.adb_path = adb_path
+        self.telegram_package = self.TELEGRAM_PACKAGE
         self.debug_dir = PROJECT_ROOT / "debug"
         self._root_mode: Optional[str] = None
         self._root_checked = False
@@ -320,7 +325,7 @@ class DeviceController:
 
         Command pattern:
           adb -s <device_udid> shell am start -W -a android.intent.action.VIEW \
-            -d "tg://socks?server=<ip>&port=<port>" org.telegram.messenger
+            -d "tg://socks?server=<ip>&port=<port>" <detected_telegram_package>
         """
         host = str(ip or "").strip()
         port_raw = str(port or "").strip()
@@ -350,7 +355,7 @@ class DeviceController:
             "android.intent.action.VIEW",
             "-d",
             deep_link,
-            self.TELEGRAM_PACKAGE,
+            self.telegram_package,
             check=False,
             timeout=20,
         )
@@ -387,6 +392,7 @@ class DeviceController:
             for candidate in self.PROXY_ENABLE_TEXT_CANDIDATES
             if str(candidate).strip()
         ]
+        proxy_enable_resource_ids = self._proxy_enable_resource_ids()
         deadline = time.time() + max(timeout, 0.5)
         while time.time() < deadline:
             xml_text = self._dump_ui_xml()
@@ -398,7 +404,7 @@ class DeviceController:
                 continue
 
             # Prefer stable resource-id selectors when available.
-            for resource_id in self.PROXY_ENABLE_RESOURCE_IDS:
+            for resource_id in proxy_enable_resource_ids:
                 for node in root.iter("node"):
                     if node.attrib.get("resource-id") != resource_id:
                         continue
@@ -437,7 +443,7 @@ class DeviceController:
                 return selector
 
             # Compatibility fallback to existing generic helpers.
-            for resource_id in self.PROXY_ENABLE_RESOURCE_IDS:
+            for resource_id in proxy_enable_resource_ids:
                 try:
                     if self._tap_by_resource_id(resource_id):
                         selector = f"resourceId={resource_id}"
@@ -470,14 +476,16 @@ class DeviceController:
         Stop Telegram and clear its app data.
         """
         LOGGER.info("Preparing device %s: clearing Telegram app data", self.device_id)
-        self._adb("shell", "am", "force-stop", self.TELEGRAM_PACKAGE, check=False)
-        self._adb("shell", "pm", "clear", self.TELEGRAM_PACKAGE)
+        self._adb("shell", "am", "force-stop", self.telegram_package, check=False)
+        self._adb("shell", "pm", "clear", self.telegram_package)
 
-    def cleanup_telegram(self, package_name: str = TELEGRAM_PACKAGE) -> None:
+    def cleanup_telegram(self, package_name: Optional[str] = None) -> None:
         """
         Backward-compatible alias for app cleanup.
         """
-        _ = package_name
+        normalized = str(package_name or "").strip()
+        if normalized:
+            self.telegram_package = normalized
         self.prepare_device()
 
     def launch_telegram(self) -> None:
@@ -489,18 +497,20 @@ class DeviceController:
             "shell",
             "monkey",
             "-p",
-            self.TELEGRAM_PACKAGE,
+            self.telegram_package,
             "-c",
             "android.intent.category.LAUNCHER",
             "1",
         )
         time.sleep(2.0)
 
-    def open_telegram(self, package_name: str = TELEGRAM_PACKAGE) -> None:
+    def open_telegram(self, package_name: Optional[str] = None) -> None:
         """
         Backward-compatible alias for app launch.
         """
-        _ = package_name
+        normalized = str(package_name or "").strip()
+        if normalized:
+            self.telegram_package = normalized
         self.launch_telegram()
 
     def get_device_info(self) -> Dict[str, str]:
@@ -531,7 +541,7 @@ class DeviceController:
         android_release = (
             self._adb("shell", "getprop", "ro.build.version.release").stdout.strip() or "Unknown"
         )
-        dumpsys_out = self._adb("shell", "dumpsys", "package", self.TELEGRAM_PACKAGE).stdout
+        dumpsys_out = self._adb("shell", "dumpsys", "package", self.telegram_package).stdout
         telegram_version = self._extract_telegram_version_from_dumpsys(dumpsys_out)
 
         fingerprint = {
@@ -545,7 +555,7 @@ class DeviceController:
     def export_telegram_session_files(
         self,
         output_dir: str | Path,
-        package_name: str = TELEGRAM_PACKAGE,
+        package_name: Optional[str] = None,
     ) -> Dict[str, Path]:
         """
         Export Telegram auth artifacts from private app storage to local directory.
@@ -565,10 +575,11 @@ class DeviceController:
         remote_prefs_dir = f"{remote_export_dir}/shared_prefs"
         local_export_dir = destination / export_tag
 
+        resolved_package_name = str(package_name or "").strip() or self.telegram_package
         base_data_path = ""
         for candidate in (
-            f"/data/data/{package_name}",
-            f"/data/user/0/{package_name}",
+            f"/data/data/{resolved_package_name}",
+            f"/data/user/0/{resolved_package_name}",
         ):
             check_cmd = f"test -d {shlex.quote(candidate)} && echo ok"
             probe = self._adb("shell", "sh", "-c", check_cmd, check=False)
@@ -578,7 +589,7 @@ class DeviceController:
 
         if not base_data_path:
             raise RuntimeError(
-                f"Telegram data dir not found for package {package_name!r} on {self.device_id}"
+                f"Telegram data dir not found for package {resolved_package_name!r} on {self.device_id}"
             )
 
         setup_script = (
@@ -640,19 +651,19 @@ class DeviceController:
         if country_code:
             cc_digits = re.sub(r"\D", "", country_code)
             if cc_digits:
-                if self._tap_by_resource_id("org.telegram.messenger:id/login_phone_code_text"):
+                if self._tap_telegram_resource("login_phone_code_text"):
                     self._input_text(cc_digits)
                     time.sleep(0.3)
 
         phone_digits = re.sub(r"\D", "", phone_number)
-        if self._tap_by_resource_id("org.telegram.messenger:id/login_phone_number_text"):
+        if self._tap_telegram_resource("login_phone_number_text"):
             self._input_text(phone_digits)
         else:
             # TODO: calibrate coordinates for your Telegram build if no resource-id found.
             self._tap_percent(0.5, 0.42)
             self._input_text(phone_digits)
 
-        if not self._tap_by_resource_id("org.telegram.messenger:id/login_btn"):
+        if not self._tap_telegram_resource("login_btn"):
             self._tap_by_text_candidates(("Done", "Next", "Продолжить", "Далее"))
             self._adb("shell", "input", "keyevent", "66", check=False)
         time.sleep(1.5)
@@ -662,7 +673,7 @@ class DeviceController:
         Input verification SMS code in Telegram.
         """
         LOGGER.info("Inputting SMS code on Telegram UI")
-        if not self._tap_by_resource_id("org.telegram.messenger:id/login_code_text"):
+        if not self._tap_telegram_resource("login_code_text"):
             self._tap_percent(0.5, 0.36)
         self._input_text(str(code))
         self._adb("shell", "input", "keyevent", "66", check=False)
@@ -676,13 +687,13 @@ class DeviceController:
         best-effort matching with a fallback tap.
         """
         LOGGER.info("Inputting email on Telegram UI")
-        known_ids = (
-            "org.telegram.messenger:id/email",
-            "org.telegram.messenger:id/login_email_field",
-            "org.telegram.messenger:id/code_field",
+        known_resource_names = (
+            "email",
+            "login_email_field",
+            "code_field",
         )
 
-        tapped = any(self._tap_by_resource_id(rid) for rid in known_ids)
+        tapped = any(self._tap_telegram_resource(resource_name) for resource_name in known_resource_names)
         if not tapped:
             if not self._tap_by_text_candidates(("Email", "Почта", "@")):
                 # TODO: calibrate tap coordinates for email field if needed.
@@ -696,21 +707,21 @@ class DeviceController:
         Fill first/last name step in Telegram profile setup.
         """
         LOGGER.info("Filling Telegram profile name fields")
-        if self._tap_by_resource_id("org.telegram.messenger:id/first_name_field"):
+        if self._tap_telegram_resource("first_name_field"):
             self._input_text(first_name)
         else:
             # TODO: calibrate first-name field coordinates for your UI build.
             self._tap_percent(0.5, 0.32)
             self._input_text(first_name)
 
-        if self._tap_by_resource_id("org.telegram.messenger:id/last_name_field"):
+        if self._tap_telegram_resource("last_name_field"):
             self._input_text(last_name)
         else:
             # TODO: calibrate last-name field coordinates for your UI build.
             self._tap_percent(0.5, 0.40)
             self._input_text(last_name)
 
-        if not self._tap_by_resource_id("org.telegram.messenger:id/login_btn"):
+        if not self._tap_telegram_resource("login_btn"):
             self._tap_by_text_candidates(("Done", "Next", "Continue", "Готово"))
         time.sleep(1.0)
 
@@ -774,10 +785,64 @@ class DeviceController:
         text_candidates = " | ".join(self._extract_text_candidates(xml_text)).lower()
         return any(str(item).lower() in text_candidates for item in patterns)
 
+    def _telegram_packages_priority(self) -> tuple[str, ...]:
+        ordered = [self.telegram_package, *self.TELEGRAM_PACKAGE_CANDIDATES]
+        unique: list[str] = []
+        seen: set[str] = set()
+        for package_name in ordered:
+            normalized = str(package_name or "").strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            unique.append(normalized)
+        return tuple(unique)
+
+    def _telegram_resource_id(self, resource_name: str, package_name: Optional[str] = None) -> str:
+        normalized_name = str(resource_name or "").strip()
+        if normalized_name.startswith("id/"):
+            resource_suffix = normalized_name
+        else:
+            resource_suffix = f"id/{normalized_name}"
+        target_package = str(package_name or self.telegram_package).strip() or self.TELEGRAM_PACKAGE
+        return f"{target_package}:{resource_suffix}"
+
+    def _telegram_resource_id_candidates(self, resource_name: str) -> tuple[str, ...]:
+        return tuple(
+            self._telegram_resource_id(resource_name=resource_name, package_name=package_name)
+            for package_name in self._telegram_packages_priority()
+        )
+
+    def _tap_telegram_resource(self, resource_name: str) -> bool:
+        for resource_id in self._telegram_resource_id_candidates(resource_name):
+            if self._tap_by_resource_id(resource_id):
+                return True
+        return False
+
+    def _proxy_enable_resource_ids(self) -> tuple[str, ...]:
+        resource_ids = ["android:id/button1"]
+        for package_name in self._telegram_packages_priority():
+            for resource_suffix in self.PROXY_ENABLE_RESOURCE_ID_SUFFIXES:
+                resource_ids.append(self._telegram_resource_id(resource_suffix, package_name=package_name))
+        return tuple(dict.fromkeys(resource_ids))
+
     def _is_telegram_installed(self) -> bool:
-        result = self._adb("shell", "pm", "path", self.TELEGRAM_PACKAGE, check=False, timeout=15)
-        output = (result.stdout or "").strip()
-        return result.returncode == 0 and "package:" in output
+        for package_name in self.TELEGRAM_PACKAGE_CANDIDATES:
+            expected_line = f"package:{package_name}"
+            grep_command = f"pm list packages | grep -x {shlex.quote(expected_line)}"
+            result = self._adb(
+                "shell",
+                "sh",
+                "-c",
+                grep_command,
+                check=False,
+                timeout=15,
+            )
+            lines = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+            if result.returncode == 0 and expected_line in lines:
+                self.telegram_package = package_name
+                LOGGER.info("Detected Telegram package on %s: %s", self.device_id, self.telegram_package)
+                return True
+        return False
 
     def _has_internet(self) -> bool:
         ping_result = self._adb(
