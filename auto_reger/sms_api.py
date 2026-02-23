@@ -480,6 +480,7 @@ class SmsApi(SMSActivateAPI):
         service: str,
         country: str,
         max_price: Optional[float] = None,
+        country_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Rent a phone number for SMS verification.
@@ -495,24 +496,52 @@ class SmsApi(SMSActivateAPI):
         :param service: Service short name (e.g. "tg" for Telegram).
         :param country: Country name in English/Russian as understood by provider.
         :param max_price: Optional maximum price filter.
+        :param country_id: Optional explicit provider country id. If provided,
+                           this id is used as-is and country name lookup is skipped.
         :return: Response dictionary from provider (possibly containing 'error').
         """
-        country_id = self._get_country_id(country)
+        if country_id is None:
+            resolved_country_id = self._get_country_id(country)
+        else:
+            try:
+                resolved_country_id = int(country_id)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Invalid country_id value: {country_id!r}") from exc
 
-        kwargs: Dict[str, Any] = {"service": service, "country": int(country_id)}
+        kwargs: Dict[str, Any] = {"service": service, "country": int(resolved_country_id)}
+        normalized_max_price: Optional[float] = None
         if max_price is not None:
-            kwargs["maxPrice"] = max_price
+            normalized_max_price = float(max_price)
+            kwargs["maxPrice"] = normalized_max_price
 
         logging.info(
             "Requesting number: service=%s country=%s (id=%s) max_price=%s",
             service,
             country,
-            country_id,
+            resolved_country_id,
             max_price,
         )
 
         try:
             resp: Any = self.getNumberV2(**kwargs)
+        except TypeError as e:
+            # Some client versions may expect max_price instead of maxPrice.
+            if normalized_max_price is not None and "maxPrice" in str(e):
+                fallback_kwargs = dict(kwargs)
+                fallback_kwargs.pop("maxPrice", None)
+                fallback_kwargs["max_price"] = normalized_max_price
+                logging.info(
+                    "Provider client rejected maxPrice, retrying with max_price for country_id=%s",
+                    resolved_country_id,
+                )
+                try:
+                    resp = self.getNumberV2(**fallback_kwargs)
+                except Exception as retry_error:
+                    logging.exception("Error requesting number from SMS API: %s", retry_error)
+                    return {"error": str(retry_error)}
+            else:
+                logging.exception("Error requesting number from SMS API: %s", e)
+                return {"error": str(e)}
         except Exception as e:
             logging.exception("Error requesting number from SMS API: %s", e)
             return {"error": str(e)}

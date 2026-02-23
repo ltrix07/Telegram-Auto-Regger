@@ -39,6 +39,9 @@ sms_api:
   # api_url: "https://hero-sms.com/stubs/handler_api.php"
   api_key_path: "secrets/sms_api_key.txt"
   telegram_service_code: "tg"
+  max_price: 3.0
+  # USA regular pool for sms-activate compatible APIs
+  country_id: 187
 
 proxy_api:
   key: "YOUR_PROXY_SELLER_API_KEY"

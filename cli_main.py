@@ -471,13 +471,48 @@ def rent_number_with_retry(sms_api: SmsApi) -> Tuple[str, str]:
     registration_cfg = CONFIG.get("registration", {})
     telegram_service_code = str(sms_cfg.get("telegram_service_code", "tg")).strip()
     country = str(registration_cfg.get("default_country", "USA")).strip()
-    max_price = registration_cfg.get("default_max_price")
+    max_price_raw = sms_cfg.get("max_price", registration_cfg.get("default_max_price"))
+    try:
+        max_price = float(max_price_raw) if max_price_raw is not None else None
+    except (TypeError, ValueError):
+        LOGGER.warning(
+            "Invalid max price in config (sms_api.max_price=%r), falling back to registration.default_max_price",
+            max_price_raw,
+        )
+        fallback_price = registration_cfg.get("default_max_price")
+        try:
+            max_price = float(fallback_price) if fallback_price is not None else None
+        except (TypeError, ValueError):
+            LOGGER.warning(
+                "Invalid registration.default_max_price=%r. Sending request without max price limit.",
+                fallback_price,
+            )
+            max_price = None
+
+    country_id_raw = sms_cfg.get("country_id")
+    country_id: Optional[int] = None
+    if country_id_raw not in (None, ""):
+        try:
+            country_id = int(country_id_raw)
+        except (TypeError, ValueError):
+            LOGGER.warning(
+                "Invalid sms_api.country_id=%r. Falling back to country name resolution for %s.",
+                country_id_raw,
+                country,
+            )
+
+    LOGGER.info(
+        "Requesting number with ID %s and limit $%s.",
+        country_id if country_id is not None else "auto",
+        f"{max_price:.2f}" if max_price is not None else "none",
+    )
 
     def _rent_number() -> Tuple[str, str]:
         payload = sms_api.verification_number(
             service=telegram_service_code,
             country=country,
             max_price=max_price,
+            country_id=country_id,
         )
         return extract_activation_and_phone(payload)
 
