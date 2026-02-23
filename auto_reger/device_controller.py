@@ -826,22 +826,30 @@ class DeviceController:
         return tuple(dict.fromkeys(resource_ids))
 
     def _is_telegram_installed(self) -> bool:
-        for package_name in self.TELEGRAM_PACKAGE_CANDIDATES:
-            expected_line = f"package:{package_name}"
-            grep_command = f"pm list packages | grep -x {shlex.quote(expected_line)}"
-            result = self._adb(
-                "shell",
-                "sh",
-                "-c",
-                grep_command,
-                check=False,
-                timeout=15,
-            )
-            lines = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
-            if result.returncode == 0 and expected_line in lines:
+        result = subprocess.run(
+            [self.adb_path, "-s", self.device_id, "shell", "pm", "list", "packages"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        packages_out = result.stdout or ""
+        candidates = [
+            "org.telegram.messenger.web",
+            "org.telegram.messenger",
+            "org.telegram.messenger.beta",
+        ]
+
+        for package_name in candidates:
+            if f"package:{package_name}" in packages_out:
                 self.telegram_package = package_name
-                LOGGER.info("Detected Telegram package on %s: %s", self.device_id, self.telegram_package)
+                LOGGER.info("Successfully detected Telegram package: %s", package_name)
                 return True
+
+        telegram_lines = [line for line in packages_out.splitlines() if "telegram" in line.lower()]
+        LOGGER.error(
+            "Could not find exact Telegram package. Lines containing 'telegram': %s",
+            telegram_lines,
+        )
         return False
 
     def _has_internet(self) -> bool:
