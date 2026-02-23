@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import logging
 import re
+import shlex
 import subprocess
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Tuple
 
@@ -28,6 +28,21 @@ class DeviceController:
 
     TELEGRAM_PACKAGE = "org.telegram.messenger"
     UI_DUMP_PATH = "/sdcard/window_dump.xml"
+    PROXY_ENABLE_TEXT_CANDIDATES = (
+        "enable proxy",
+        "enable",
+        "turn on proxy",
+        "\u0432\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u043f\u0440\u043e\u043a\u0441\u0438",
+        "\u0432\u043a\u043b\u044e\u0447\u0438\u0442\u044c",
+        "\u0432\u043a\u043b",
+    )
+    PROXY_ENABLE_RESOURCE_IDS = (
+        "android:id/button1",
+        "org.telegram.messenger:id/button1",
+        "org.telegram.messenger:id/button_positive",
+        "org.telegram.messenger:id/positive_button",
+        "org.telegram.messenger:id/login_btn",
+    )
 
     def __init__(self, device_id: str, adb_path: str = "adb") -> None:
         """
@@ -41,10 +56,12 @@ class DeviceController:
         self.device_id = normalized
         self.adb_path = adb_path
         self.debug_dir = PROJECT_ROOT / "debug"
+        self._root_mode: Optional[str] = None
+        self._root_checked = False
 
-    def _adb(self, *args: str, check: bool = True, timeout: int = 30) -> subprocess.CompletedProcess[str]:
+    def _run_adb(self, *args: str, check: bool = True, timeout: int = 30) -> subprocess.CompletedProcess[str]:
         """
-        Execute an ADB command for the target device.
+        Execute raw ADB command for target device without shell/root rewriting.
 
         :param args: ADB command arguments after ``adb -s <device_id>``.
         :param check: Raise RuntimeError on non-zero exit code if True.
@@ -64,29 +81,84 @@ class DeviceController:
             )
         return result
 
+    def _ensure_root_access(self) -> None:
+        """
+        Ensure root shell is available and cache execution mode.
+
+        Preferred mode is ``adb root`` (adbd as root). If unavailable, falls
+        back to ``su -c`` shell commands.
+        """
+        if self._root_checked:
+            if not self._root_mode:
+                raise RuntimeError(f"Root access is unavailable on {self.device_id}")
+            return
+
+        self._root_checked = True
+        self._root_mode = None
+
+        self._run_adb("root", check=False, timeout=20)
+        time.sleep(0.8)
+
+        adbd_probe = self._run_adb("shell", "id", "-u", check=False, timeout=10)
+        if adbd_probe.returncode == 0 and adbd_probe.stdout.strip() == "0":
+            self._root_mode = "adbd"
+            LOGGER.info("Root mode for %s: adbd", self.device_id)
+            return
+
+        su_probe = self._run_adb("shell", "su", "-c", "id -u", check=False, timeout=10)
+        if su_probe.returncode == 0 and su_probe.stdout.strip() == "0":
+            self._root_mode = "su"
+            LOGGER.info("Root mode for %s: su", self.device_id)
+            return
+
+        raise RuntimeError(
+            "Root access is required but unavailable on {} (adbd stdout={!r}, su stdout={!r})".format(
+                self.device_id,
+                (adbd_probe.stdout or "").strip(),
+                (su_probe.stdout or "").strip(),
+            )
+        )
+
+    def _adb(self, *args: str, check: bool = True, timeout: int = 30) -> subprocess.CompletedProcess[str]:
+        """
+        Execute ADB command with automatic root wrapping for ``shell`` actions.
+        """
+        if args and args[0] == "shell":
+            self._ensure_root_access()
+            shell_args = [str(part) for part in args[1:]]
+            if not shell_args:
+                return self._run_adb(*args, check=check, timeout=timeout)
+
+            if self._root_mode == "adbd":
+                return self._run_adb("shell", *shell_args, check=check, timeout=timeout)
+
+            root_command = shlex.join(shell_args)
+            return self._run_adb("shell", "su", "-c", root_command, check=check, timeout=timeout)
+
+        return self._run_adb(*args, check=check, timeout=timeout)
+
     def connect(self) -> None:
         """
         Connect to network ADB device if ``device_id`` is in ``host:port`` format.
 
         USB serials are left untouched.
         """
-        if ":" not in self.device_id:
-            return
-
-        LOGGER.info("Connecting to ADB device %s", self.device_id)
-        result = subprocess.run(
-            [self.adb_path, "connect", self.device_id],
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                "Failed to connect ADB device {}: {}".format(
-                    self.device_id,
-                    (result.stderr or result.stdout or "").strip(),
-                )
+        if ":" in self.device_id:
+            LOGGER.info("Connecting to ADB device %s", self.device_id)
+            result = subprocess.run(
+                [self.adb_path, "connect", self.device_id],
+                capture_output=True,
+                text=True,
+                timeout=20,
             )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    "Failed to connect ADB device {}: {}".format(
+                        self.device_id,
+                        (result.stderr or result.stdout or "").strip(),
+                    )
+                )
+        self._ensure_root_access()
 
     def is_ready(self) -> bool:
         """
@@ -120,38 +192,53 @@ class DeviceController:
             LOGGER.exception("Readiness check failed for device %s", self.device_id)
             return False
 
-    def take_screenshot(self, name: str) -> Path:
+    def take_screenshot(self, save_path: str) -> bool:
         """
-        Save current screen and UI XML snapshot into `debug/`.
+        Save a PNG screenshot to host filesystem using fast ``exec-out`` stream.
+
+        Command pattern:
+          adb -s <device_udid> exec-out screencap -p > <save_path>
         """
-        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(name or "error")).strip("_") or "error"
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        device_key = self.device_id.replace(":", "_")
-        stem = f"{safe_name}_{device_key}_{timestamp}"
-
-        self.debug_dir.mkdir(parents=True, exist_ok=True)
-        local_png = self.debug_dir / f"{stem}.png"
-        local_xml = self.debug_dir / f"{stem}.xml"
-        remote_png = f"/sdcard/{stem}.png"
-
-        self._adb("shell", "screencap", "-p", remote_png, check=False, timeout=20)
-        pull_result = self._adb("pull", remote_png, str(local_png), check=False, timeout=30)
-        self._adb("shell", "rm", "-f", remote_png, check=False, timeout=10)
+        raw_path = str(save_path or "").strip()
+        if not raw_path:
+            LOGGER.error("Screenshot save path is empty for device %s", self.device_id)
+            return False
+        target_path = Path(raw_path)
 
         try:
-            local_xml.write_text(self._dump_ui_xml(), encoding="utf-8")
-        except Exception:
-            LOGGER.exception("Failed to dump UI XML during screenshot capture for %s", self.device_id)
-
-        if pull_result.returncode != 0 or not local_png.exists():
-            raise RuntimeError(
-                "Failed to pull screenshot from device {}: {}".format(
-                    self.device_id,
-                    (pull_result.stderr or pull_result.stdout or "").strip(),
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            cmd = [self.adb_path, "-s", self.device_id, "exec-out", "screencap", "-p"]
+            with target_path.open("wb") as output:
+                result = subprocess.run(
+                    cmd,
+                    stdout=output,
+                    stderr=subprocess.PIPE,
+                    timeout=20,
+                    check=False,
                 )
-            )
 
-        return local_png
+            if result.returncode != 0:
+                LOGGER.error(
+                    "Failed to capture screenshot via exec-out on %s: %s",
+                    self.device_id,
+                    (result.stderr or b"").decode("utf-8", errors="ignore").strip(),
+                )
+                target_path.unlink(missing_ok=True)
+                return False
+
+            if not target_path.exists() or target_path.stat().st_size == 0:
+                LOGGER.error("Captured screenshot is empty for %s", self.device_id)
+                target_path.unlink(missing_ok=True)
+                return False
+
+            return True
+        except Exception:
+            LOGGER.exception("Failed to capture screenshot for %s", self.device_id)
+            try:
+                target_path.unlink(missing_ok=True)
+            except Exception:
+                LOGGER.exception("Failed to cleanup invalid screenshot file: %s", target_path)
+            return False
 
     def set_proxy(self, proxy_string: str) -> None:
         """
@@ -220,6 +307,152 @@ class DeviceController:
             f"Failed to set proxy on {self.device_id}. Expected={target_proxy!r}, got={current_value!r}"
         )
 
+    def set_telegram_proxy_via_intent(self, ip: str, port: str) -> bool:
+        """
+        Open Telegram SOCKS proxy deep-link and trigger system proxy-enable popup.
+
+        Command pattern:
+          adb -s <device_udid> shell am start -W -a android.intent.action.VIEW \
+            -d "tg://socks?server=<ip>&port=<port>" org.telegram.messenger
+        """
+        host = str(ip or "").strip()
+        port_raw = str(port or "").strip()
+        if not host:
+            LOGGER.error("Telegram proxy intent skipped: empty host for %s", self.device_id)
+            return False
+        if not port_raw.isdigit():
+            LOGGER.error("Telegram proxy intent skipped: invalid port %r for %s", port_raw, self.device_id)
+            return False
+
+        port_value = int(port_raw)
+        if not 1 <= port_value <= 65535:
+            LOGGER.error("Telegram proxy intent skipped: out-of-range port %s for %s", port_value, self.device_id)
+            return False
+
+        deep_link = f"tg://socks?server={host}&port={port_value}"
+        result = self._run_adb(
+            "shell",
+            "am",
+            "start",
+            "-W",
+            "-a",
+            "android.intent.action.VIEW",
+            "-d",
+            deep_link,
+            self.TELEGRAM_PACKAGE,
+            check=False,
+            timeout=20,
+        )
+        output = f"{result.stdout}\n{result.stderr}".lower()
+        if result.returncode != 0 or "error:" in output or "exception" in output:
+            LOGGER.error(
+                "Failed to open Telegram proxy intent on %s for %s:%s | stdout=%r stderr=%r",
+                self.device_id,
+                host,
+                port_value,
+                (result.stdout or "").strip(),
+                (result.stderr or "").strip(),
+            )
+            return False
+
+        LOGGER.info(
+            "Telegram proxy intent opened on %s for %s:%s",
+            self.device_id,
+            host,
+            port_value,
+        )
+        return True
+
+    def enable_telegram_proxy_popup(self, timeout: float = 7.0, poll_interval: float = 0.4) -> str:
+        """
+        Wait for Telegram proxy confirmation popup and tap its positive action.
+
+        :return: Selector description used to tap the button.
+        :raises TimeoutError: If confirmation button was not found in time.
+        """
+        normalized_candidates = [
+            candidate.strip().lower()
+            for candidate in self.PROXY_ENABLE_TEXT_CANDIDATES
+            if str(candidate).strip()
+        ]
+        deadline = time.time() + max(timeout, 0.5)
+        while time.time() < deadline:
+            xml_text = self._dump_ui_xml()
+            try:
+                root = ET.fromstring(xml_text)
+            except ET.ParseError:
+                LOGGER.debug("Proxy popup XML parse failed on %s", self.device_id, exc_info=True)
+                time.sleep(max(poll_interval, 0.1))
+                continue
+
+            # Prefer stable resource-id selectors when available.
+            for resource_id in self.PROXY_ENABLE_RESOURCE_IDS:
+                for node in root.iter("node"):
+                    if node.attrib.get("resource-id") != resource_id:
+                        continue
+                    center = self._parse_bounds(str(node.attrib.get("bounds", "")))
+                    if not center:
+                        continue
+                    self._tap(*center)
+                    selector = f"resourceId={resource_id}"
+                    LOGGER.info("Tapped Telegram proxy enable button by %s", selector)
+                    return selector
+
+            # Fallback to locale-aware text matching.
+            for node in root.iter("node"):
+                node_text = str(node.attrib.get("text", "")).strip()
+                node_desc = str(node.attrib.get("content-desc", "")).strip()
+                haystack = f"{node_text} {node_desc}".lower()
+                if not haystack:
+                    continue
+
+                matched_candidate = next(
+                    (cand for cand in normalized_candidates if cand and cand in haystack),
+                    "",
+                )
+                if not matched_candidate:
+                    continue
+
+                center = self._parse_bounds(str(node.attrib.get("bounds", "")))
+                if not center:
+                    continue
+                self._tap(*center)
+                selector = (
+                    f"text~{matched_candidate!r} "
+                    f"(node_text={node_text!r}, content_desc={node_desc!r})"
+                )
+                LOGGER.info("Tapped Telegram proxy enable button by %s", selector)
+                return selector
+
+            # Compatibility fallback to existing generic helpers.
+            for resource_id in self.PROXY_ENABLE_RESOURCE_IDS:
+                try:
+                    if self._tap_by_resource_id(resource_id):
+                        selector = f"resourceId={resource_id}"
+                        LOGGER.info("Tapped Telegram proxy enable button by %s", selector)
+                        return selector
+                except Exception:
+                    LOGGER.debug(
+                        "Proxy popup check by id failed on %s: %s",
+                        self.device_id,
+                        resource_id,
+                        exc_info=True,
+                    )
+
+            try:
+                if self._tap_by_text_candidates(self.PROXY_ENABLE_TEXT_CANDIDATES):
+                    selector = "text-candidates:fallback"
+                    LOGGER.info("Tapped Telegram proxy enable button by %s", selector)
+                    return selector
+            except Exception:
+                LOGGER.debug("Proxy popup text scan failed on %s", self.device_id, exc_info=True)
+
+            time.sleep(max(poll_interval, 0.1))
+
+        raise TimeoutError(
+            f"Telegram proxy enable popup did not appear on {self.device_id} within {timeout:.1f}s"
+        )
+
     def prepare_device(self) -> None:
         """
         Stop Telegram and clear its app data.
@@ -264,17 +497,123 @@ class DeviceController:
 
         :return: Dict with keys: ``device_model`` and ``system_version``.
         """
-        model = self._adb("shell", "getprop", "ro.product.model").stdout.strip() or "Unknown Android"
-        version = (
-            self._adb("shell", "getprop", "ro.build.version.release").stdout.strip()
-            or "Unknown"
-        )
+        fingerprint = self.get_device_fingerprint()
         info = {
-            "device_model": model,
-            "system_version": f"Android {version}",
+            "device_model": fingerprint["device_model"],
+            "system_version": fingerprint["system_version"],
+            "app_version": fingerprint["app_version"],
         }
         LOGGER.info("Device info detected: %s", info)
         return info
+
+    def get_device_fingerprint(self) -> Dict[str, str]:
+        """
+        Collect real Telegram Android fingerprint from the container.
+
+        Required fields:
+          - ro.product.model
+          - ro.build.version.release
+          - Telegram APK versionName from dumpsys package
+        """
+        model = self._adb("shell", "getprop", "ro.product.model").stdout.strip() or "Unknown Android"
+        android_release = (
+            self._adb("shell", "getprop", "ro.build.version.release").stdout.strip() or "Unknown"
+        )
+        dumpsys_out = self._adb("shell", "dumpsys", "package", self.TELEGRAM_PACKAGE).stdout
+        telegram_version = self._extract_telegram_version_from_dumpsys(dumpsys_out)
+
+        fingerprint = {
+            "device_model": model,
+            "system_version": f"Android {android_release}",
+            "app_version": telegram_version or "Unknown",
+        }
+        LOGGER.info("Device fingerprint collected for %s: %s", self.device_id, fingerprint)
+        return fingerprint
+
+    def export_telegram_session_files(
+        self,
+        output_dir: str | Path,
+        package_name: str = TELEGRAM_PACKAGE,
+    ) -> Dict[str, Path]:
+        """
+        Export Telegram auth artifacts from private app storage to local directory.
+
+        Files are copied under root to ``/sdcard/.tg_session_export_*`` and then
+        pulled to host. Expected key artifacts include:
+          - files/tgnet.dat
+          - shared_prefs/userconfing.xml (and userconfig.xml fallback)
+          - additional shared_prefs XML files
+        """
+        destination = Path(output_dir)
+        destination.mkdir(parents=True, exist_ok=True)
+
+        export_tag = f".tg_session_export_{int(time.time() * 1000)}"
+        remote_export_dir = f"/sdcard/{export_tag}"
+        remote_files_dir = f"{remote_export_dir}/files"
+        remote_prefs_dir = f"{remote_export_dir}/shared_prefs"
+        local_export_dir = destination / export_tag
+
+        base_data_path = ""
+        for candidate in (
+            f"/data/data/{package_name}",
+            f"/data/user/0/{package_name}",
+        ):
+            check_cmd = f"test -d {shlex.quote(candidate)} && echo ok"
+            probe = self._adb("shell", "sh", "-c", check_cmd, check=False)
+            if "ok" in (probe.stdout or ""):
+                base_data_path = candidate
+                break
+
+        if not base_data_path:
+            raise RuntimeError(
+                f"Telegram data dir not found for package {package_name!r} on {self.device_id}"
+            )
+
+        setup_script = (
+            f"rm -rf {shlex.quote(remote_export_dir)} && "
+            f"mkdir -p {shlex.quote(remote_files_dir)} {shlex.quote(remote_prefs_dir)} && "
+            f"cp {shlex.quote(base_data_path + '/files/tgnet.dat')} {shlex.quote(remote_files_dir + '/tgnet.dat')} && "
+            f"chmod 0644 {shlex.quote(remote_files_dir + '/tgnet.dat')} && "
+            f"cp {shlex.quote(base_data_path + '/shared_prefs')}/userconfing.xml {shlex.quote(remote_prefs_dir)}/ 2>/dev/null || true && "
+            f"cp {shlex.quote(base_data_path + '/shared_prefs')}/userconfig.xml {shlex.quote(remote_prefs_dir)}/ 2>/dev/null || true && "
+            f"cp {shlex.quote(base_data_path + '/shared_prefs')}/mainconfig.xml {shlex.quote(remote_prefs_dir)}/ 2>/dev/null || true && "
+            f"cp {shlex.quote(base_data_path + '/shared_prefs')}/*.xml {shlex.quote(remote_prefs_dir)}/ 2>/dev/null || true && "
+            f"chmod 0644 {shlex.quote(remote_prefs_dir)}/*.xml 2>/dev/null || true && "
+            f"test -f {shlex.quote(remote_files_dir + '/tgnet.dat')}"
+        )
+        self._adb("shell", "sh", "-c", setup_script, timeout=45)
+
+        try:
+            self._adb("pull", remote_export_dir, str(destination), timeout=60)
+        finally:
+            self._adb("shell", "rm", "-rf", remote_export_dir, check=False, timeout=20)
+
+        if not local_export_dir.exists():
+            # Fallback for host-specific adb pull behavior.
+            fallback_match = next(
+                (item for item in destination.glob(f"**/{export_tag}") if item.is_dir()),
+                None,
+            )
+            if fallback_match is not None:
+                local_export_dir = fallback_match
+
+        pulled_files: Dict[str, Path] = {}
+        for local_file in local_export_dir.rglob("*"):
+            if local_file.is_file():
+                pulled_files[local_file.name] = local_file
+
+        if "tgnet.dat" not in pulled_files:
+            raise RuntimeError(f"tgnet.dat was not exported from {self.device_id}")
+        if "userconfing.xml" not in pulled_files and "userconfig.xml" not in pulled_files:
+            raise RuntimeError("Neither userconfing.xml nor userconfig.xml was exported.")
+
+        LOGGER.info(
+            "Exported %s Telegram session files from %s to %s",
+            len(pulled_files),
+            self.device_id,
+            local_export_dir,
+        )
+        return pulled_files
 
     def input_phone(self, phone_number: str, country_code: Optional[str] = None) -> None:
         """
@@ -526,6 +865,17 @@ class DeviceController:
             if content:
                 values.append(content)
         return values
+
+    @staticmethod
+    def _extract_telegram_version_from_dumpsys(dumpsys_output: str) -> str:
+        for line in dumpsys_output.splitlines():
+            if "versionName=" not in line:
+                continue
+            _, _, version = line.partition("versionName=")
+            cleaned = version.strip()
+            if cleaned:
+                return cleaned
+        return ""
 
     def _tap(self, x: int, y: int) -> None:
         self._adb("shell", "input", "tap", str(x), str(y))

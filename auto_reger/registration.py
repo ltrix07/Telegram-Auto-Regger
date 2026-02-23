@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import re
 import time
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
 from auto_reger.device_controller import DeviceController
+
+LOGGER = logging.getLogger(__name__)
 
 
 class RegistrationError(RuntimeError):
@@ -35,6 +38,33 @@ class TelegramRegistrator:
         {"textMatches": "(?i).*continue.*"},
         {"textMatches": "(?i).*next.*"},
     )
+    PROXY_ENABLE_TIMEOUT_SECONDS = 7.0
+    PROXY_ENABLE_SELECTORS = (
+        {
+            "xpath": (
+                "//android.widget.TextView["
+                "@text='ENABLE' or @text='Enable' or @text='ENABLE PROXY' or @text='Enable Proxy' "
+                "or @text='\u0412\u041a\u041b\u042e\u0427\u0418\u0422\u042c' "
+                "or @text='\u0412\u043a\u043b\u044e\u0447\u0438\u0442\u044c' "
+                "or @text='\u0412\u041a\u041b\u042e\u0427\u0418\u0422\u042c \u041f\u0420\u041e\u041a\u0421\u0418' "
+                "or @text='\u0412\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u043f\u0440\u043e\u043a\u0441\u0438'"
+                "]"
+            )
+        },
+        {"textMatches": "(?iu)^enable( proxy)?$"},
+        {"textMatches": "(?iu)^turn on( proxy)?$"},
+        {
+            "textMatches": (
+                "(?iu)^"
+                "\u0432\u043a\u043b\u044e\u0447\u0438\u0442\u044c"
+                "( \u043f\u0440\u043e\u043a\u0441\u0438)?$"
+            )
+        },
+        {"resourceId": "android:id/button1"},
+        {"resourceId": "org.telegram.messenger:id/button1"},
+        {"resourceId": "org.telegram.messenger:id/button_positive"},
+        {"resourceId": "org.telegram.messenger:id/positive_button"},
+    )
 
     def __init__(
         self,
@@ -52,9 +82,29 @@ class TelegramRegistrator:
         self,
         country_code: str,
         names_generator: Callable[[], Any] | Iterable[Any],
+        proxy_ip: Optional[str] = None,
+        proxy_port: Optional[str] = None,
     ) -> Dict[str, str]:
         normalized_code = self._normalize_country_code(country_code)
         self.device_controller.airplane_mode_toggle()
+
+        proxy_host = str(proxy_ip or "").strip()
+        proxy_port_value = str(proxy_port or "").strip()
+        if proxy_host and proxy_port_value and hasattr(self.device_controller, "set_telegram_proxy_via_intent"):
+            intent_applied = self.device_controller.set_telegram_proxy_via_intent(proxy_host, proxy_port_value)
+            if intent_applied:
+                try:
+                    self._wait_and_enable_proxy_popup(timeout=self.PROXY_ENABLE_TIMEOUT_SECONDS)
+                except TimeoutError:
+                    LOGGER.warning(
+                        "Telegram proxy popup was not detected on time; continuing registration flow."
+                    )
+            else:
+                LOGGER.warning(
+                    "Failed to trigger Telegram proxy intent for %s:%s; continuing registration flow.",
+                    proxy_host,
+                    proxy_port_value,
+                )
 
         activation_id, full_phone_number = self._request_number(normalized_code)
         national_number = self._extract_local_number(full_phone_number, normalized_code)
@@ -140,6 +190,26 @@ class TelegramRegistrator:
             except Exception:
                 continue
         return False
+
+    def _wait_and_enable_proxy_popup(self, timeout: float = PROXY_ENABLE_TIMEOUT_SECONDS) -> None:
+        if hasattr(self.device_controller, "enable_telegram_proxy_popup"):
+            self.device_controller.enable_telegram_proxy_popup(timeout=timeout)
+            return
+
+        deadline = time.time() + max(timeout, 0.5)
+        while time.time() < deadline:
+            for selector in self.PROXY_ENABLE_SELECTORS:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    break
+                try:
+                    self.device_controller.click(selector, timeout=min(1.0, max(remaining, 0.1)))
+                    return
+                except Exception:
+                    continue
+            time.sleep(0.2)
+
+        raise TimeoutError("Telegram proxy popup button was not found within timeout.")
 
     def _request_number(self, country_code: str) -> Tuple[Optional[str], str]:
         payload: Any

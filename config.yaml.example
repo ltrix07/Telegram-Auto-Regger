@@ -2,16 +2,17 @@ logging:
   file: "telegram_regger.log"
   level: "INFO"
 
+notifications:
+  enabled: true
+  bot_token: "YOUR_BOT_TOKEN_HERE"
+  admin_chat_id: "YOUR_CHAT_ID_HERE"
+  cycle_alert_cooldown_seconds: 300
+
 paths:
   cech_file: "cech.json"
   sessions_converted_dir: "sessions/converted"
   telethon_sessions_dir: "sessions/telethon"
-  telegram_desktop_accounts_dir: "sessions/tg_desk"
-  telegram_desktop_executable: "Telegram.exe"
-  telegram_desktop_data_dir: "%LOCALAPPDATA%\\Telegram Desktop"
   last_names_file: "data/last_names.txt"
-  chrome_executable: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
-  express_vpn_executable: "C:\\Program Files (x86)\\ExpressVPN\\expressvpn-ui\\ExpressVPN.exe"
   adb_executable: "adb"
 
 adb:
@@ -25,9 +26,10 @@ concurrency:
   device_list:
     - "127.0.0.1:5555"
 
-emulator:
-  executable_path: "C:\\LDPlayer\\LDPlayer9\\dnplayer.exe"
-  process_name: "dnplayer.exe"
+docker:
+  compose_file: "docker-compose.yml"
+  project_name: "auto_reger"
+  boot_timeout_seconds: 60
 
 sms_api:
   # Supported providers: "sms-activate", "grizzly-sms", "hero-sms"
@@ -65,17 +67,10 @@ registration:
   anti_bot_max_delay_seconds: 5.0
   telegram_code_input_xpath: "//android.widget.EditText"
 
-windows_automation:
-  vpn_window_title_regex: "ExpressVPN.*"
-  telegram_window_title: "Telegram"
-
 timeouts:
   element_search_seconds: 10
   page_load_seconds: 30
-  window_wait_seconds: 20
   poll_interval_seconds: 1.0
-  desktop_key_delay_seconds: 0.2
-  vpn_settle_seconds: 5.0
   process_shutdown_seconds: 15
   sms_code_wait_seconds: 120
   telethon_code_wait_seconds: 120

@@ -1,0 +1,13 @@
+2026-02-22 15:03:39,841 - INFO - libssl.py:79 - <module>() - Failed to load SSL library: <class 'OSError'> (no library called "ssl" found)
+2026-02-22 15:03:39,842 - INFO - aes.py:25 - <module>() - cryptg module not installed and libssl not found, falling back to (slower) Python encryption
+2026-02-22 15:04:47,554 - INFO - sessions.py:419 - create_session_from_auth_key_bytes() - Session file created at tmp_test.session from raw auth key (dc_id=2)
+2026-02-22 15:05:15,629 - INFO - sessions.py:424 - create_session_from_auth_key_bytes() - Session file created at tmp_test.session from raw auth key (dc_id=2)
+2026-02-23 20:34:11,523 - INFO - libssl.py:79 - <module>() - Failed to load SSL library: <class 'OSError'> (no library called "ssl" found)
+2026-02-23 20:34:11,524 - INFO - aes.py:25 - <module>() - cryptg module not installed and libssl not found, falling back to (slower) Python encryption
+2026-02-23 20:37:36,478 - INFO - proxy_api.py:111 - _ensure_proxies_loaded() - Resident proxy list not found for country=USA. Creating a new list.
+2026-02-23 20:37:36,923 - INFO - proxy_api.py:144 - _create_list() - Creating resident list for country=USA with 1000 ports and rotation=1200s (whitelist=85.198.252.111).
+2026-02-23 20:43:38,388 - WARNING - proxy_api.py:97 - _resolve_country_code() - geo.json not found at C:\Users\Владимир\PycharmProjects\Telegrm-Auto-Regger\geo.json. Country resolver fallback is used; country input stays unchanged.
+2026-02-23 21:11:30,242 - INFO - proxy_api.py:177 - _ensure_proxies_loaded() - Resident proxy list not found for country=US. Creating a new list.
+2026-02-23 21:11:30,699 - INFO - proxy_api.py:210 - _create_list() - Creating resident list for country=US with 1000 ports and rotation=1200s (whitelist=85.198.252.111).
+2026-02-23 21:11:34,606 - INFO - proxy_api.py:221 - _create_list() - Resident list created for country=US, list_id=19743186.
+2026-02-23 21:11:34,606 - INFO - proxy_api.py:182 - _ensure_proxies_loaded() - Downloading resident proxies list id=19743186 for country=US.

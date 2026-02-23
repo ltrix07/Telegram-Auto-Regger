@@ -6,16 +6,20 @@ import queue
 import random
 import re
 import signal
+import subprocess
 import sys
 import threading
 import time
+import traceback
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 from auto_reger.device_controller import DeviceController
+from auto_reger.emulator import DockerAndroidController
 from auto_reger.email_api import EmailApi
+from auto_reger.notifier import TelegramNotifier
 from auto_reger.proxy_api import ProxyApi
 from auto_reger.session_generator import SessionGenerator
 from auto_reger.sms_api import (
@@ -31,6 +35,27 @@ LOGGER = logging.getLogger("cli_regger")
 STOP_EVENT = threading.Event()
 ACTIVE_ACTIVATIONS_LOCK = threading.Lock()
 ACTIVE_ACTIVATIONS: dict[str, dict[str, str]] = {}
+ALERT_RATE_LIMIT_LOCK = threading.Lock()
+LAST_CYCLE_ALERT_AT: dict[str, float] = {}
+ALERT_SEND_LOCK = threading.Lock()
+
+ROUTINE_ALERT_SKIP_PATTERNS: tuple[str, ...] = (
+    "sms code not received",
+    "sms status polling failed",
+    "wait sms code",
+    "rent sms number failed",
+    "no free numbers",
+    "no_numbers",
+    "not enough balance",
+    "invalid proxy payload",
+    "failed to set proxy",
+    "proxy apply verification failed",
+    "proxy api returned an empty list",
+    "telegram proxy intent failed",
+    "telegram proxy popup was not confirmed",
+    "proxy must be socks5",
+    "internet connectivity check failed",
+)
 
 
 class ShutdownRequested(RuntimeError):
@@ -68,23 +93,6 @@ class DevicePool:
     def release(self, device_id: str) -> None:
         if device_id:
             self._queue.put(device_id)
-
-
-class ProxyRotator:
-    """Round-robin proxy allocator shared between workers."""
-
-    def __init__(self, proxies: list[str]) -> None:
-        if not proxies:
-            raise ValueError("ProxyRotator requires at least one proxy.")
-        self._proxies = proxies
-        self._index = 0
-        self._lock = threading.Lock()
-
-    def next_proxy(self) -> str:
-        with self._lock:
-            proxy_value = self._proxies[self._index % len(self._proxies)]
-            self._index += 1
-            return proxy_value
 
 
 def setup_logging() -> None:
@@ -158,49 +166,6 @@ def retry_call(
     raise RuntimeError(f"{operation} failed after {attempts} attempts") from last_error
 
 
-def parse_proxy(proxy_raw: str) -> Optional[Dict[str, Any]]:
-    raw = str(proxy_raw or "").strip()
-    if not raw:
-        return None
-
-    parts = raw.split(":")
-    known_types = {"http", "https", "socks4", "socks5"}
-    if len(parts) in {2, 4} and parts[0].lower().strip() not in known_types:
-        proxy_cfg = CONFIG.get("proxy_api", {})
-        proxy_type = str(proxy_cfg.get("default_type", "socks5")).lower().strip()
-        host = parts[0].strip()
-        port = int(parts[1].strip())
-        username = parts[2].strip() if len(parts) > 2 else ""
-        password = parts[3].strip() if len(parts) > 3 else ""
-    elif len(parts) >= 3:
-        proxy_type = parts[0].lower().strip()
-        host = parts[1].strip()
-        port = int(parts[2].strip())
-        username = parts[3].strip() if len(parts) > 3 else ""
-        password = parts[4].strip() if len(parts) > 4 else ""
-    else:
-        raise ValueError(
-            "Invalid proxy format. Expected type:ip:port:user:pass, type:ip:port, ip:port or ip:port:user:pass"
-        )
-
-    return {
-        "type": proxy_type,
-        "host": host,
-        "port": port,
-        "username": username,
-        "password": password,
-    }
-
-
-def proxy_dict_to_string(proxy_dict: Dict[str, Any]) -> str:
-    base = f"{proxy_dict['type']}:{proxy_dict['host']}:{proxy_dict['port']}"
-    username = str(proxy_dict.get("username", "")).strip()
-    password = str(proxy_dict.get("password", "")).strip()
-    if username or password:
-        return f"{base}:{username}:{password}"
-    return base
-
-
 def build_sms_api() -> SmsApi:
     sms_cfg = CONFIG.get("sms_api", {})
     service_name = str(sms_cfg.get("service_name", "sms-activate")).strip()
@@ -263,6 +228,171 @@ def load_profile_names() -> list[str]:
         LOGGER.warning("Last names file not found: %s. Using fallback values.", resolved)
         return ["Smith", "Johnson", "Brown", "Taylor"]
     return load_names(str(resolved))
+
+
+def build_telegram_notifier() -> Optional[TelegramNotifier]:
+    notifications_cfg = CONFIG.get("notifications", {})
+    if not isinstance(notifications_cfg, dict):
+        return None
+    if not bool(notifications_cfg.get("enabled", False)):
+        return None
+
+    bot_token = str(notifications_cfg.get("bot_token", "")).strip()
+    admin_chat_id = str(notifications_cfg.get("admin_chat_id", "")).strip()
+    if not bot_token or not admin_chat_id:
+        LOGGER.warning("Notifications enabled, but bot_token/admin_chat_id are not configured.")
+        return None
+
+    try:
+        return TelegramNotifier(bot_token=bot_token, chat_id=admin_chat_id)
+    except Exception:
+        LOGGER.exception("Failed to initialize Telegram notifier.")
+        return None
+
+
+def _is_routine_cycle_error(exc: BaseException) -> bool:
+    chunks = [str(exc)]
+    if exc.__cause__ is not None:
+        chunks.append(str(exc.__cause__))
+    if exc.__context__ is not None:
+        chunks.append(str(exc.__context__))
+    payload = " | ".join(part for part in chunks if part).lower()
+    if not payload:
+        return False
+    return any(pattern in payload for pattern in ROUTINE_ALERT_SKIP_PATTERNS)
+
+
+def _build_alert_signature(exc: BaseException) -> str:
+    chunks = [str(exc)]
+    if exc.__cause__ is not None:
+        chunks.append(str(exc.__cause__))
+    payload = " | ".join(part for part in chunks if part).lower()
+    payload = re.sub(r"0x[0-9a-f]+", "<hex>", payload)
+    payload = re.sub(r"\d+", "<num>", payload)
+    payload = re.sub(r"\s+", " ", payload).strip()
+    return f"{type(exc).__name__}:{payload[:220]}"
+
+
+def _cycle_alert_cooldown_seconds() -> int:
+    notifications_cfg = CONFIG.get("notifications", {})
+    if not isinstance(notifications_cfg, dict):
+        return 300
+    raw_value = notifications_cfg.get("cycle_alert_cooldown_seconds", 300)
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return 300
+    return max(value, 0)
+
+
+def _acquire_cycle_alert_slot(signature: str, cooldown_seconds: int) -> tuple[bool, float]:
+    now = time.time()
+    with ALERT_RATE_LIMIT_LOCK:
+        last_ts = LAST_CYCLE_ALERT_AT.get(signature)
+        if last_ts is not None:
+            elapsed = now - last_ts
+            if elapsed < cooldown_seconds:
+                return False, cooldown_seconds - elapsed
+        LAST_CYCLE_ALERT_AT[signature] = now
+    return True, 0.0
+
+
+def _build_debug_screenshot_path(device_id: str, reason: str) -> Path:
+    debug_dir = Path("debug")
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    safe_reason = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(reason or "error")).strip("_") or "error"
+    safe_device = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(device_id or "unknown")).strip("_") or "unknown"
+    return debug_dir / f"{safe_reason}_{safe_device}_{int(time.time())}.png"
+
+
+def maybe_send_cycle_error_alert(
+    notifier: Optional[TelegramNotifier],
+    *,
+    cycle_index: int,
+    total_cycles: int,
+    device_id: str,
+    device: Optional[DeviceController],
+    exc: BaseException,
+    error_trace: str,
+) -> None:
+    if not notifier:
+        return
+    if _is_routine_cycle_error(exc):
+        LOGGER.info(
+            "Cycle %s/%s routine failure, Telegram alert skipped: %s",
+            cycle_index,
+            total_cycles,
+            exc,
+        )
+        return
+
+    signature = _build_alert_signature(exc)
+    cooldown_seconds = _cycle_alert_cooldown_seconds()
+    allowed, retry_after = _acquire_cycle_alert_slot(signature, cooldown_seconds)
+    if not allowed:
+        LOGGER.info(
+            "Cycle alert suppressed by cooldown (retry in %.0fs): %s",
+            retry_after,
+            signature,
+        )
+        return
+
+    screenshot_path: Optional[str] = None
+    try:
+        if device:
+            path = _build_debug_screenshot_path(device.device_id, reason=f"cycle_{cycle_index}_alert")
+            if device.take_screenshot(str(path)):
+                screenshot_path = str(path)
+        elif device_id:
+            screenshot_path = take_alert_screenshot(device_id=device_id, reason=f"cycle_{cycle_index}_alert")
+    except Exception:
+        LOGGER.exception("Failed to capture cycle alert screenshot on %s", device_id or "unknown")
+
+    alert_text = (
+        f"Cycle {cycle_index}/{total_cycles} unexpected failure on {device_id or 'unknown'}\n"
+        f"Error type: {type(exc).__name__}\n"
+        f"Message: {exc}\n\n"
+        f"Traceback:\n{error_trace}"
+    )
+    with ALERT_SEND_LOCK:
+        sent = notifier.send_error_alert(error_message=alert_text, screenshot_path=screenshot_path)
+    if sent:
+        LOGGER.info("Cycle alert sent to Telegram for cycle %s on %s", cycle_index, device_id or "unknown")
+    else:
+        LOGGER.warning("Cycle alert delivery failed for cycle %s on %s", cycle_index, device_id or "unknown")
+
+
+def resolve_alert_device_id() -> str:
+    devices = CONFIG.get("concurrency", {}).get("device_list", [])
+    if isinstance(devices, list):
+        for candidate in devices:
+            normalized = str(candidate).strip()
+            if normalized:
+                return normalized
+    return str(CONFIG.get("adb", {}).get("device_udid", "")).strip()
+
+
+def take_alert_screenshot(device_id: str, reason: str = "fatal_error") -> Optional[str]:
+    normalized_id = str(device_id or "").strip()
+    if not normalized_id:
+        return None
+
+    adb_path = str(CONFIG.get("adb", {}).get("adb_path", "adb")).strip() or "adb"
+    if ":" in normalized_id:
+        subprocess.run(
+            [adb_path, "connect", normalized_id],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+
+    screenshot_path = _build_debug_screenshot_path(normalized_id, reason=reason)
+
+    device = DeviceController(device_id=normalized_id, adb_path=adb_path)
+    if device.take_screenshot(str(screenshot_path)):
+        return str(screenshot_path)
+    return None
 
 
 def maybe_handle_email_step(device: DeviceController, email_api: Optional[EmailApi]) -> None:
@@ -382,10 +512,13 @@ def wait_sms_code(sms_api: SmsApi, activation_id: str) -> str:
 
 def hard_reset_device(device: DeviceController, reason: str) -> None:
     try:
-        screenshot_path = device.take_screenshot(reason)
-        LOGGER.info("Saved debug screenshot: %s", screenshot_path)
+        screenshot_path = _build_debug_screenshot_path(device.device_id, reason=reason)
+        if device.take_screenshot(str(screenshot_path)):
+            LOGGER.info("Saved debug screenshot: %s", screenshot_path)
+        else:
+            LOGGER.warning("Failed to capture screenshot on %s", device.device_id)
     except Exception:
-        LOGGER.exception("Failed to capture screenshot on %s", device.device_id)
+        LOGGER.exception("Unexpected screenshot error on %s", device.device_id)
 
     try:
         device.set_proxy("")
@@ -461,21 +594,37 @@ def resolve_workers(args: argparse.Namespace, devices_count: int) -> int:
     return workers
 
 
-def load_proxies_with_retry() -> list[str]:
-    proxy_service = ProxyApi()
+def build_docker_controller_from_config() -> tuple[DockerAndroidController, int]:
+    docker_cfg = CONFIG.get("docker", {})
+    if not isinstance(docker_cfg, dict):
+        docker_cfg = {}
 
-    def _load() -> list[str]:
-        proxies = proxy_service.get_proxies()
-        if not proxies:
-            raise RuntimeError("Proxy API returned an empty list.")
-        return proxies
+    compose_file = str(docker_cfg.get("compose_file", "docker-compose.yml")).strip()
+    project_name = str(docker_cfg.get("project_name", "auto_reger")).strip()
+    boot_timeout_raw = docker_cfg.get("boot_timeout_seconds", 60)
 
-    return retry_call(
-        operation="fetch proxies",
-        func=_load,
-        attempts=5,
-        initial_delay=2.0,
+    try:
+        boot_timeout_seconds = int(boot_timeout_raw)
+    except (TypeError, ValueError):
+        LOGGER.warning(
+            "Invalid docker.boot_timeout_seconds=%r; using default 60",
+            boot_timeout_raw,
+        )
+        boot_timeout_seconds = 60
+
+    boot_timeout_seconds = max(boot_timeout_seconds, 5)
+    controller = DockerAndroidController(
+        compose_file=compose_file,
+        compose_project=project_name,
     )
+
+    LOGGER.info(
+        "Docker controller configured: project_name=%s, compose_file=%s, boot_timeout_seconds=%s",
+        project_name,
+        compose_file,
+        boot_timeout_seconds,
+    )
+    return controller, boot_timeout_seconds
 
 
 def run_single_cycle(
@@ -484,39 +633,103 @@ def run_single_cycle(
     *,
     stop_event: threading.Event,
     device_pool: DevicePool,
-    proxy_rotator: ProxyRotator,
+    proxy_api: ProxyApi,
+    sms_api: SmsApi,
     last_names: list[str],
+    notifier: Optional[TelegramNotifier],
 ) -> CycleResult:
     device_id = ""
     device: Optional[DeviceController] = None
-    sms_api: Optional[SmsApi] = None
+    docker_controller: Optional[DockerAndroidController] = None
     email_api: Optional[EmailApi] = None
     session_generator: Optional[SessionGenerator] = None
     activation_id = ""
     phone_number = ""
-    cycle_failed = False
     cycle_success = False
 
     try:
         device_id = device_pool.acquire(stop_event=stop_event)
-        device = DeviceController(device_id=device_id)
-        sms_api = build_sms_api()
-        email_api = build_email_api()
-        session_generator = build_session_generator()
-
         LOGGER.info("Cycle %s/%s started on device %s", cycle_index, total_cycles, device_id)
         _check_shutdown(stop_event)
+
+        docker_controller, boot_timeout = build_docker_controller_from_config()
+        LOGGER.info(
+            "Cycle %s/%s pre-flight cleanup: stopping old Docker Android container",
+            cycle_index,
+            total_cycles,
+        )
+        docker_controller.stop_container()
+        _check_shutdown(stop_event)
+
+        LOGGER.info(
+            "Cycle %s/%s starting fresh Docker Android container",
+            cycle_index,
+            total_cycles,
+        )
+        docker_controller.start_container()
+        docker_controller.wait_for_boot(device_udid=device_id, timeout=boot_timeout)
+        LOGGER.info(
+            "Cycle %s/%s Android container is fully booted on %s",
+            cycle_index,
+            total_cycles,
+            device_id,
+        )
+
+        device = DeviceController(device_id=device_id)
+        email_api = build_email_api()
+        session_generator = build_session_generator()
 
         device.connect()
         if not device.is_ready():
             raise RuntimeError(f"Device {device_id} is not ready for registration.")
 
-        proxy_raw = proxy_rotator.next_proxy()
-        proxy_dict = parse_proxy(proxy_raw)
-        if not proxy_dict:
-            raise RuntimeError(f"Invalid proxy payload: {proxy_raw!r}")
+        country = str(CONFIG.get("registration", {}).get("default_country", "US")).strip() or "US"
+        proxy_data = proxy_api.get_proxy(country_code=country)
+        if not proxy_data:
+            LOGGER.error(
+                "Cycle %s/%s proxy acquisition failed: proxy_data is empty for country=%s.",
+                cycle_index,
+                total_cycles,
+                country,
+            )
+            raise RuntimeError(f"Proxy is required for registration but none returned for country={country}.")
 
-        device.set_proxy(proxy_dict_to_string(proxy_dict))
+        proxy_host = str(proxy_data.get("ip", "")).strip()
+        proxy_port = str(proxy_data.get("port", "")).strip()
+        proxy_type = str(proxy_data.get("type", "")).strip().lower()
+        if not proxy_host or not proxy_port.isdigit():
+            LOGGER.error(
+                "Cycle %s/%s invalid proxy payload from ProxyApi: %r",
+                cycle_index,
+                total_cycles,
+                proxy_data,
+            )
+            raise RuntimeError(f"Invalid proxy payload from ProxyApi: {proxy_data!r}")
+        if proxy_type != "socks5":
+            raise RuntimeError(
+                f"Proxy must be SOCKS5 for Telegram intent flow. Got type={proxy_type!r}, payload={proxy_data!r}"
+            )
+
+        proxy_dict: Dict[str, Any] = {
+            "type": "socks5",
+            "host": proxy_host,
+            "port": int(proxy_port),
+            "username": "",
+            "password": "",
+        }
+
+        if not device.set_telegram_proxy_via_intent(proxy_host, proxy_port):
+            raise RuntimeError(
+                f"Telegram proxy intent failed for {proxy_host}:{proxy_port} on {device_id}"
+            )
+
+        try:
+            device.enable_telegram_proxy_popup(timeout=7.0)
+        except TimeoutError as exc:
+            raise RuntimeError(
+                "Telegram proxy popup was not confirmed within timeout."
+            ) from exc
+
         _check_shutdown(stop_event)
 
         activation_id, phone_number = rent_number_with_retry(sms_api)
@@ -560,16 +773,35 @@ def run_single_cycle(
         LOGGER.info("Cycle %s/%s completed on device %s", cycle_index, total_cycles, device_id)
         cycle_success = True
     except ShutdownRequested:
-        cycle_failed = True
         LOGGER.info("Cycle %s interrupted by shutdown", cycle_index)
-    except Exception:
-        cycle_failed = True
-        LOGGER.exception("Cycle %s/%s failed on device %s", cycle_index, total_cycles, device_id or "unknown")
+    except Exception as exc:
+        if _is_routine_cycle_error(exc):
+            LOGGER.exception(
+                "Cycle %s/%s failed with routine error on device %s",
+                cycle_index,
+                total_cycles,
+                device_id or "unknown",
+            )
+        else:
+            LOGGER.exception(
+                "Cycle %s/%s failed with unexpected/UI error on device %s",
+                cycle_index,
+                total_cycles,
+                device_id or "unknown",
+            )
+        maybe_send_cycle_error_alert(
+            notifier=notifier,
+            cycle_index=cycle_index,
+            total_cycles=total_cycles,
+            device_id=device_id,
+            device=device,
+            exc=exc,
+            error_trace=traceback.format_exc(),
+        )
     finally:
         if activation_id:
             try:
-                cancel_client = sms_api or build_sms_api()
-                cancel_activation_safe(cancel_client, activation_id, force=stop_event.is_set())
+                cancel_activation_safe(sms_api, activation_id, force=stop_event.is_set())
             except Exception:
                 LOGGER.exception(
                     "Failed to cancel activation %s for failed cycle %s",
@@ -577,18 +809,22 @@ def run_single_cycle(
                     cycle_index,
                 )
 
-        if device:
-            if cycle_failed:
-                hard_reset_device(device, reason=f"cycle_{cycle_index}_failure")
-            else:
-                try:
-                    device.set_proxy("")
-                except Exception:
-                    LOGGER.exception("Failed to clear proxy for device %s", device.device_id)
-                try:
-                    device.prepare_device()
-                except Exception:
-                    LOGGER.exception("Post-cycle cleanup failed for device %s", device.device_id)
+        try:
+            controller = docker_controller
+            if controller is None:
+                controller, _ = build_docker_controller_from_config()
+            LOGGER.info(
+                "Cycle %s/%s final cleanup: stopping Docker Android container with volume wipe",
+                cycle_index,
+                total_cycles,
+            )
+            controller.stop_container()
+        except Exception:
+            LOGGER.exception(
+                "Cycle %s/%s failed to stop Docker container in finally",
+                cycle_index,
+                total_cycles,
+            )
 
         if device_id:
             device_pool.release(device_id)
@@ -613,7 +849,7 @@ def install_signal_handlers(stop_event: threading.Event) -> None:
         signal.signal(signal.SIGTERM, _handler)
 
 
-def cancel_remaining_activations() -> None:
+def cancel_remaining_activations(sms_api: SmsApi) -> None:
     with ACTIVE_ACTIVATIONS_LOCK:
         pending = list(ACTIVE_ACTIVATIONS.items())
 
@@ -621,7 +857,6 @@ def cancel_remaining_activations() -> None:
         return
 
     LOGGER.warning("Cancelling %s active activations before exit", len(pending))
-    sms_api = build_sms_api()
 
     for activation_id, metadata in pending:
         LOGGER.info(
@@ -633,9 +868,10 @@ def cancel_remaining_activations() -> None:
         cancel_activation_safe(sms_api=sms_api, activation_id=activation_id, force=True)
 
 
-def run() -> int:
+def run(notifier: Optional[TelegramNotifier] = None) -> int:
     args = parse_args()
     setup_logging()
+    runtime_notifier = notifier or build_telegram_notifier()
 
     if args.count < 1:
         raise ValueError("--count must be >= 1")
@@ -644,12 +880,22 @@ def run() -> int:
 
     devices = resolve_devices(args)
     workers = resolve_workers(args, devices_count=len(devices))
-    proxies = load_proxies_with_retry()
+    if workers > 1:
+        LOGGER.warning(
+            "Docker hard-reset mode is enabled with %s workers. "
+            "Shared docker-compose lifecycle can conflict in parallel runs.",
+            workers,
+        )
+    shared_sms_api = build_sms_api()
+    shared_proxy_api = ProxyApi()
 
-    LOGGER.info("Loaded %s devices and %s proxies", len(devices), len(proxies))
+    LOGGER.info(
+        "Initialized shared API clients for workers: SmsApi(service=%s), ProxyApi(stateful-rotation).",
+        getattr(shared_sms_api, "service_name", "unknown"),
+    )
+    LOGGER.info("Loaded %s devices", len(devices))
 
     device_pool = DevicePool(devices)
-    proxy_rotator = ProxyRotator(proxies)
     last_names = load_profile_names()
 
     success_count = 0
@@ -664,8 +910,10 @@ def run() -> int:
                     args.count,
                     stop_event=STOP_EVENT,
                     device_pool=device_pool,
-                    proxy_rotator=proxy_rotator,
+                    proxy_api=shared_proxy_api,
+                    sms_api=shared_sms_api,
                     last_names=last_names,
+                    notifier=runtime_notifier,
                 )
             )
 
@@ -690,11 +938,32 @@ def run() -> int:
                     if future.cancel():
                         pending.remove(future)
 
-    cancel_remaining_activations()
+    cancel_remaining_activations(shared_sms_api)
 
     LOGGER.info("Flow finished. Success: %s/%s", success_count, args.count)
     return 0 if success_count == args.count else 1
 
 
 if __name__ == "__main__":
-    sys.exit(run())
+    notifier = build_telegram_notifier()
+    try:
+        sys.exit(run(notifier=notifier))
+    except Exception:
+        error_trace = traceback.format_exc()
+        LOGGER.error("Fatal unhandled error in cli_main:\n%s", error_trace)
+
+        if notifier:
+            screenshot_path = None
+            try:
+                alert_device_id = resolve_alert_device_id()
+                screenshot_path = take_alert_screenshot(alert_device_id, reason="fatal_error")
+            except Exception:
+                LOGGER.exception("Failed to capture screenshot for fatal alert.")
+
+            with ALERT_SEND_LOCK:
+                notifier.send_error_alert(
+                    error_message=f"Auto-regger fatal error:\n{error_trace}",
+                    screenshot_path=screenshot_path,
+                )
+
+        sys.exit(1)

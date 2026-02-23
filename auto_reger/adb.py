@@ -31,6 +31,7 @@ def resolve_adb_path() -> str:
 
 
 ADB_PATH = resolve_adb_path()
+_ROOT_MODE_CACHE: dict[str, str] = {}
 
 
 USER_AGENTS = [
@@ -97,48 +98,149 @@ REAL_DEVICES = [
 ]
 
 
+def _adb_prefix(udid: str | None = None, adb_path: str | None = None) -> list[str]:
+    resolved_adb_path = adb_path or ADB_PATH
+    prefix = [resolved_adb_path]
+    if udid:
+        prefix.extend(["-s", udid])
+    return prefix
+
+
+def _adb_run(
+    args: list[str],
+    udid: str | None = None,
+    adb_path: str | None = None,
+    timeout: int = 20,
+) -> subprocess.CompletedProcess[str]:
+    cmd = _adb_prefix(udid=udid, adb_path=adb_path) + args
+    return subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+
+
+def ensure_adb_root(udid: str | None = None, adb_path: str | None = None) -> str:
+    """
+    Ensure root command execution is available for the current device.
+
+    :return: Root mode: ``adbd`` or ``su``.
+    :raises RuntimeError: If no root mode is available.
+    """
+    cache_key = udid or "__default__"
+    if cache_key in _ROOT_MODE_CACHE:
+        return _ROOT_MODE_CACHE[cache_key]
+
+    _adb_run(["root"], udid=udid, adb_path=adb_path, timeout=20)
+    time.sleep(0.8)
+
+    adbd_probe = _adb_run(["shell", "id", "-u"], udid=udid, adb_path=adb_path, timeout=10)
+    if adbd_probe.returncode == 0 and adbd_probe.stdout.strip() == "0":
+        _ROOT_MODE_CACHE[cache_key] = "adbd"
+        return "adbd"
+
+    su_probe = _adb_run(["shell", "su", "-c", "id -u"], udid=udid, adb_path=adb_path, timeout=10)
+    if su_probe.returncode == 0 and su_probe.stdout.strip() == "0":
+        _ROOT_MODE_CACHE[cache_key] = "su"
+        return "su"
+
+    raise RuntimeError(
+        "Root access is unavailable for device {} (adbd stdout={!r}, su stdout={!r})".format(
+            udid or "<default>",
+            (adbd_probe.stdout or "").strip(),
+            (su_probe.stdout or "").strip(),
+        )
+    )
+
+
+def run_adb_shell_command(
+    command: str,
+    udid: str | None = None,
+    adb_path: str | None = None,
+    timeout: int = 20,
+) -> str:
+    """
+    Execute a shell command on Android device with forced root rights.
+    """
+    root_mode = ensure_adb_root(udid=udid, adb_path=adb_path)
+    if root_mode == "adbd":
+        result = _adb_run(["shell", "sh", "-c", command], udid=udid, adb_path=adb_path, timeout=timeout)
+    else:
+        result = _adb_run(
+            ["shell", "su", "-c", command],
+            udid=udid,
+            adb_path=adb_path,
+            timeout=timeout,
+        )
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            "ADB shell command failed (device={}, command={!r}, stderr={!r})".format(
+                udid or "<default>",
+                command,
+                (result.stderr or result.stdout or "").strip(),
+            )
+        )
+    return (result.stdout or "").strip()
+
+
+def _parse_telegram_version_from_dumpsys(dumpsys_output: str) -> str:
+    for line in dumpsys_output.splitlines():
+        if "versionName=" not in line:
+            continue
+        _, _, tail = line.partition("versionName=")
+        value = tail.strip()
+        if value:
+            return value
+    return "Unknown"
+
+
+def get_device_fingerprint(udid: str, adb_path: str | None = None) -> dict:
+    """
+    Collect real Android fingerprint fields for Telethon metadata.
+
+    Returns keys:
+      - device_model
+      - system_version
+      - app_version
+    """
+    device_model = run_adb_shell_command(
+        "getprop ro.product.model",
+        udid=udid,
+        adb_path=adb_path,
+    ) or "Unknown Android"
+    android_release = run_adb_shell_command(
+        "getprop ro.build.version.release",
+        udid=udid,
+        adb_path=adb_path,
+    ) or "Unknown"
+    dumpsys_output = run_adb_shell_command(
+        "dumpsys package org.telegram.messenger",
+        udid=udid,
+        adb_path=adb_path,
+        timeout=30,
+    )
+    return {
+        "device_model": device_model,
+        "system_version": f"Android {android_release}",
+        "app_version": _parse_telegram_version_from_dumpsys(dumpsys_output),
+    }
+
+
 def run_adb_command(command: str, udid: str | None = None, adb_path: str | None = None) -> None:
     """Run a single shell command on the connected Android device via ADB.
 
     The command is executed inside an interactive "adb shell" with "su"
     to obtain root privileges. Raises RuntimeError on failure.
     """
-    resolved_adb_path = adb_path or ADB_PATH
-    adb_prefix = [resolved_adb_path]
-    if udid:
-        adb_prefix.extend(["-s", udid])
-    adb_prefix.append("shell")
-
-    try:
-        process = subprocess.Popen(
-            adb_prefix,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        # Send shell commands line-by-line.
-        commands = [
-            "su",
-            command,
-            "exit",
-            "exit",
-        ]
-
-        try:
-            stdout, stderr = process.communicate("\n".join(commands), timeout=10)
-            if stderr and process.returncode not in (0, None):
-                logging.error("ADB command failed: %s", stderr.strip())
-                raise subprocess.CalledProcessError(process.returncode, commands, stderr=stderr)
-
-            logging.info("ADB command ran: %s", stdout.strip())
-        except subprocess.TimeoutExpired as e:
-            logging.error("ADB command timeout: %s", e)
-            process.kill()
-            raise
-    except subprocess.CalledProcessError as e:
-        logging.error("ADB command error: %s", e.stderr)
-        raise RuntimeError(f"ADB command error: {e.stderr}")
+    output = run_adb_shell_command(
+        command=command,
+        udid=udid,
+        adb_path=adb_path,
+    )
+    logging.info("ADB command ran (root): %s", output)
 
 
 def connect_adb(udid: str, max_attempts: int = 3, adb_path: str | None = None) -> bool:
@@ -173,14 +275,19 @@ def connect_adb(udid: str, max_attempts: int = 3, adb_path: str | None = None) -
                 udid,
                 connect_result.stdout.strip(),
             )
-            probe_result = subprocess.run(
-                [resolved_adb_path, "-s", udid, "shell", "echo", "online"],
-                capture_output=True,
-                text=True,
-                check=False,
+            probe_result = _adb_run(
+                ["shell", "echo", "online"],
+                udid=udid,
+                adb_path=resolved_adb_path,
+                timeout=10,
             )
             if probe_result.returncode == 0 and "online" in probe_result.stdout.strip():
-                return True
+                try:
+                    root_mode = ensure_adb_root(udid=udid, adb_path=resolved_adb_path)
+                    logging.info("ADB root mode for %s: %s", udid, root_mode)
+                    return True
+                except Exception as root_exc:
+                    logging.error("Connected to %s but failed to obtain root: %s", udid, root_exc)
 
         time.sleep(2)
 
@@ -206,53 +313,27 @@ def get_device_info(udid: str) -> dict:
     :param udid: Device serial / host:port pair.
     :return: Dict with keys: ``model``, ``full_model``, ``android``, ``tg``, ``sys_lang``.
     """
-    # Android version
-    process = subprocess.Popen(f'"{ADB_PATH}" -s {udid} shell getprop ro.build.version.release',
-                               stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, shell=True)
-    output, error = process.communicate()
-    android_version = output.decode().strip() if not error else "Unknown"
-
-    # Device model
-    process = subprocess.Popen(f'"{ADB_PATH}" -s {udid} shell getprop ro.product.model',
-                               stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, shell=True)
-    output, error = process.communicate()
-    device_model = output.decode().strip() if not error else "Unknown"
-
-    # Telegram version (best-effort)
-    process = subprocess.Popen(
-        f'"{ADB_PATH}" -s {udid} shell dumpsys package org.telegram.messenger | grep versionName',
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        shell=True,
-    )
-    output, error = process.communicate()
-    tg_version = "Unknown"
-    if not error:
-        line = output.decode().strip()
-        if "versionName=" in line:
-            tg_version = line.split("versionName=")[-1].strip()
-
-    # System language (locale)
-    process = subprocess.Popen(f'"{ADB_PATH}" -s {udid} shell getprop persist.sys.locale',
-                               stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, shell=True)
-    output, error = process.communicate()
-    sys_lang = output.decode().strip() if not error else "Unknown"
+    fingerprint = get_device_fingerprint(udid=udid, adb_path=ADB_PATH)
+    device_model = fingerprint["device_model"]
+    tg_version = fingerprint["app_version"]
+    system_version = fingerprint["system_version"]
+    sys_lang = run_adb_shell_command(
+        "getprop persist.sys.locale",
+        udid=udid,
+        adb_path=ADB_PATH,
+    ) or "Unknown"
 
     # Map model to a full readable name
     try:
         full_model = next(device['full_name'] for device in REAL_DEVICES if device['model'] == device_model)
     except StopIteration:
-        # Fallback to a random known device full name if model is not in catalogue
-        full_model = random.choice([device['full_name'] for device in REAL_DEVICES])
-        logging.warning(f"Model {device_model} not found in REAL_DEVICES, using random full_name: {full_model}")
+        full_model = device_model or "Unknown"
+        logging.warning("Model %s not found in REAL_DEVICES catalogue", device_model)
 
     return {
         'model': device_model,
         'full_model': full_model,
-        'android': 'Android ' + android_version,
+        'android': system_version,
         'tg': tg_version,
         'sys_lang': sys_lang
     }
@@ -390,82 +471,48 @@ def generate_and_set_user_agent() -> str | None:
         return None
 
 
-def change_setting(level, setting_name, value, su=False):
+def change_setting(level, setting_name, value, su=True):
     try:
+        command = f"settings put {level} {setting_name} {value}"
         if su:
-            process = subprocess.Popen(
-                [ADB_PATH, "shell"],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            commands = [
-                "su",
-                f"settings put {level} {setting_name} {value}",
-                "exit",
-                "exit"
-            ]
-            stdout, stderr = process.communicate("\n".join(commands), timeout=10)
+            run_adb_shell_command(command, adb_path=ADB_PATH, timeout=10)
         else:
-            process = subprocess.Popen(
-                [ADB_PATH, "shell", "settings", "put", level, setting_name, str(value)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
+            result = _adb_run(
+                ["shell", "settings", "put", level, setting_name, str(value)],
+                adb_path=ADB_PATH,
+                timeout=10,
             )
-            stdout, stderr = process.communicate(timeout=10)
-
-        if stderr:
-            logging.error(f"Failed to change setting {setting_name}: {stderr}")
-            raise subprocess.CalledProcessError(process.returncode, commands if su else [], stderr=stderr)
+            if result.returncode != 0:
+                raise RuntimeError((result.stderr or result.stdout or "").strip())
         logging.info(f"Setting {setting_name} changed to {value}")
     except subprocess.TimeoutExpired as e:
         logging.error(f"Timeout when changing setting {setting_name}: {e}")
-        process.kill()
         raise
-    except subprocess.CalledProcessError as e:
-        logging.error(f"Error changing setting {setting_name}: {e.stderr}")
-        raise RuntimeError(f"Error changing setting {setting_name}: {e.stderr}")
+    except Exception as e:
+        logging.error(f"Error changing setting {setting_name}: {e}")
+        raise RuntimeError(f"Error changing setting {setting_name}: {e}")
 
 
-def change_prop(setting_name, value, su=False):
+def change_prop(setting_name, value, su=True):
     try:
+        command = f"setprop {setting_name} {value}"
         if su:
-            process = subprocess.Popen(
-                [ADB_PATH, "shell"],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            commands = [
-                "su",
-                f"setprop {setting_name} {value}",
-                "exit",
-                "exit"
-            ]
-            stdout, stderr = process.communicate("\n".join(commands), timeout=10)
+            run_adb_shell_command(command, adb_path=ADB_PATH, timeout=10)
         else:
-            process = subprocess.Popen(
-                [ADB_PATH, "shell", "setprop", setting_name, str(value)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
+            result = _adb_run(
+                ["shell", "setprop", setting_name, str(value)],
+                adb_path=ADB_PATH,
+                timeout=10,
             )
-            stdout, stderr = process.communicate(timeout=10)
-
-        if stderr:
-            logging.error(f"Failed to change prop {setting_name}: {stderr}")
-            raise subprocess.CalledProcessError(process.returncode, commands if su else [], stderr=stderr)
+            if result.returncode != 0:
+                raise RuntimeError((result.stderr or result.stdout or "").strip())
         logging.info(f"Prop {setting_name} changed to {value}")
     except subprocess.TimeoutExpired as e:
         logging.error(f"Timeout when changing prop {setting_name}: {e}")
-        process.kill()
         raise
-    except subprocess.CalledProcessError as e:
-        logging.error(f"Error changing prop {setting_name}: {e.stderr}")
-        raise RuntimeError(f"Error changing prop {setting_name}: {e.stderr}")
+    except Exception as e:
+        logging.error(f"Error changing prop {setting_name}: {e}")
+        raise RuntimeError(f"Error changing prop {setting_name}: {e}")
 
 
 def set_random_timezone():
