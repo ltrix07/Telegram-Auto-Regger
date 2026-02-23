@@ -102,24 +102,25 @@ class DockerAndroidController:
             timeout,
         )
 
-        if ":" in normalized_udid:
-            connect_cmd = [self.adb_path, "connect", normalized_udid]
-            connect_result = subprocess.run(
-                connect_cmd,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=15,
-            )
-            if connect_result.stdout.strip():
-                LOGGER.debug("ADB connect stdout: %s", connect_result.stdout.strip())
-            if connect_result.stderr.strip():
-                LOGGER.debug("ADB connect stderr: %s", connect_result.stderr.strip())
-
         deadline = time.monotonic() + int(timeout)
         attempt = 0
         while time.monotonic() < deadline:
             attempt += 1
+            try:
+                subprocess.run(
+                    [self.adb_path, "connect", normalized_udid],
+                    capture_output=True,
+                    timeout=5,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                LOGGER.debug(
+                    "ADB connect timed out on boot check attempt %s for %s",
+                    attempt,
+                    normalized_udid,
+                )
+                continue
+
             cmd = [
                 self.adb_path,
                 "-s",
@@ -128,13 +129,21 @@ class DockerAndroidController:
                 "getprop",
                 "sys.boot_completed",
             ]
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=10,
-            )
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=10,
+                )
+            except subprocess.TimeoutExpired:
+                LOGGER.debug(
+                    "ADB getprop timed out on boot check attempt %s for %s",
+                    attempt,
+                    normalized_udid,
+                )
+                continue
             status = result.stdout.strip()
             LOGGER.debug(
                 "Boot check attempt %s on %s: return_code=%s, status=%r, stderr=%r",
@@ -152,6 +161,31 @@ class DockerAndroidController:
         raise TimeoutError(
             f"Timed out waiting for Android boot on `{normalized_udid}` after {timeout}s."
         )
+
+    def install_apk(self, device_udid: str, apk_path: str = "/app/telegram.apk") -> None:
+        normalized_udid = str(device_udid or "").strip()
+        if not normalized_udid:
+            raise ValueError("device_udid is required for APK installation.")
+
+        normalized_apk_path = str(apk_path or "").strip()
+        if not normalized_apk_path:
+            raise ValueError("apk_path is required for APK installation.")
+
+        LOGGER.info(
+            "Installing Telegram APK on `%s` from `%s` with auto-granted permissions",
+            normalized_udid,
+            normalized_apk_path,
+        )
+        result = subprocess.run(
+            [self.adb_path, "-s", normalized_udid, "install", "-g", normalized_apk_path],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        if result.stdout.strip():
+            LOGGER.info("ADB install output on `%s`: %s", normalized_udid, result.stdout.strip())
+        if result.stderr.strip():
+            LOGGER.debug("ADB install stderr on `%s`: %s", normalized_udid, result.stderr.strip())
 
 
 class Emulator:

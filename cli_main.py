@@ -668,6 +668,22 @@ def run_single_cycle(
         )
         docker_controller.start_container()
         docker_controller.wait_for_boot(device_udid=device_id, timeout=boot_timeout)
+        try:
+            docker_controller.install_apk(device_id)
+        except Exception:
+            LOGGER.critical(
+                "Cycle %s/%s failed: Telegram APK installation failed on %s. Aborting cycle.",
+                cycle_index,
+                total_cycles,
+                device_id,
+                exc_info=True,
+            )
+            return CycleResult(
+                index=cycle_index,
+                success=False,
+                device_id=device_id or "unknown",
+                phone_number=phone_number,
+            )
         LOGGER.info(
             "Cycle %s/%s Android container is fully booted on %s",
             cycle_index,
