@@ -38,9 +38,13 @@ class DeviceController:
         "enable proxy",
         "enable",
         "turn on proxy",
+        "connect proxy",
+        "connect",
         "\u0432\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u043f\u0440\u043e\u043a\u0441\u0438",
         "\u0432\u043a\u043b\u044e\u0447\u0438\u0442\u044c",
         "\u0432\u043a\u043b",
+        "\u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u044c",
+        "\u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u0442\u044c",
     )
     PROXY_ENABLE_RESOURCE_ID_SUFFIXES = (
         "button1",
@@ -447,6 +451,19 @@ class DeviceController:
                     f"text~{matched_candidate!r} "
                     f"(node_text={node_text!r}, content_desc={node_desc!r})"
                 )
+                LOGGER.info("Tapped Telegram proxy enable button by %s", selector)
+                return selector
+
+            # Some Telegram builds expose button label only via content-desc.
+            for node in root.iter("node"):
+                node_desc = str(node.attrib.get("content-desc", "")).strip()
+                if node_desc.lower() != "connect proxy":
+                    continue
+                center = self._parse_bounds(str(node.attrib.get("bounds", "")))
+                if not center:
+                    continue
+                self._tap(*center)
+                selector = "content-desc='Connect Proxy'"
                 LOGGER.info("Tapped Telegram proxy enable button by %s", selector)
                 return selector
 

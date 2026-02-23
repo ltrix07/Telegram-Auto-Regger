@@ -747,7 +747,7 @@ def run_single_cycle(
             )
 
         try:
-            device.enable_telegram_proxy_popup(timeout=7.0)
+            device.enable_telegram_proxy_popup(timeout=15.0)
         except TimeoutError as exc:
             raise RuntimeError(
                 "Telegram proxy popup was not confirmed within timeout."
