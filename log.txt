@@ -32,3 +32,8 @@ RuntimeError: Proxy-Seller API returned error payload on /resident/list/add: {'s
 2026-02-23 21:36:48,772 - INFO - proxy_api.py:268 - _create_list() - Creating resident list for country=US with 1000 ports and rotation=1200s.
 2026-02-23 21:36:50,701 - INFO - proxy_api.py:278 - _create_list() - Resident list created for country=US, list_id=19743371.
 2026-02-23 21:36:51,549 - INFO - proxy_api.py:250 - _ensure_proxies_loaded() - Сгенерировано 1000 портов для res.proxy-seller.com (country=US, list_id=19743371).
+2026-02-23 23:17:06,940 - INFO - proxy_api.py:170 - _ensure_proxies_loaded() - Resident proxy list not found for country=US. Creating a new list.
+2026-02-23 23:17:06,940 - INFO - proxy_api.py:244 - _create_list() - Creating resident list for country=US with 1000 ports and rotation=1200s.
+2026-02-23 23:17:06,940 - INFO - proxy_api.py:256 - _create_list() - Resident list created for country=US, list_id=10.
+2026-02-23 23:17:06,940 - INFO - proxy_api.py:173 - _ensure_proxies_loaded() - Resident list created for country=US, list_id=10.
+2026-02-23 23:17:06,940 - INFO - proxy_api.py:226 - _ensure_proxies_loaded() - Сгенерировано 2 портов для res.proxy-seller.com (country=US, list_id=10).

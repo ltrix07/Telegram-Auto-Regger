@@ -168,33 +168,9 @@ class ProxyApi:
 
         if not target_list:
             LOGGER.info("Resident proxy list not found for country=%s. Creating a new list.", resolved_code)
-            try:
-                list_id = self._create_list(resolved_code)
-            except Exception as exc:
-                LOGGER.exception(
-                    "Failed to create resident list for country=%s. "
-                    "This may happen due to account limits or duplicate resources.",
-                    resolved_code,
-                )
-                refreshed_payload = self._request_json("GET", "/resident/lists")
-                target_list = self._find_list_by_country(refreshed_payload, resolved_code)
-                if not target_list:
-                    raise RuntimeError(
-                        f"Failed to create resident list for country={resolved_code}. "
-                        "No existing list was found after create failure."
-                    ) from exc
-                list_id = self._extract_list_id(target_list)
-                LOGGER.info(
-                    "Using existing resident list id=%s for country=%s after create failure.",
-                    list_id or "unknown",
-                    resolved_code,
-                )
-            else:
-                refreshed_payload = self._request_json("GET", "/resident/lists")
-                target_list = self._find_list_by_id(refreshed_payload, list_id) or self._find_list_by_country(
-                    refreshed_payload,
-                    resolved_code,
-                )
+            target_list = self._create_list(resolved_code)
+            list_id = self._extract_list_id(target_list)
+            LOGGER.info("Resident list created for country=%s, list_id=%s.", resolved_code, list_id or "unknown")
         else:
             list_id = self._extract_list_id(target_list)
             LOGGER.info("Using existing resident list id=%s for country=%s.", list_id, resolved_code)
@@ -255,7 +231,7 @@ class ProxyApi:
             list_id or "unknown",
         )
 
-    def _create_list(self, country: str) -> str:
+    def _create_list(self, country: str) -> dict[str, Any]:
         """Create a resident proxy list with fixed 1000 ports and 1200s rotation."""
         payload = {
             "title": f"AutoReger {country}",
@@ -270,13 +246,20 @@ class ProxyApi:
             country,
         )
         response_payload = self._request_json("POST", "/resident/list/add", json_body=payload)
-        list_id = self._extract_list_id(response_payload)
+        parsed_lists = self._extract_lists(response_payload)
+        created_list = parsed_lists[0] if parsed_lists else {}
+        list_id = self._extract_list_id(created_list) or self._extract_list_id(response_payload)
         if not list_id:
             raise RuntimeError(
                 f"Proxy-Seller API did not return a list id after creation for country={country}. Payload: {response_payload!r}"
             )
         LOGGER.info("Resident list created for country=%s, list_id=%s.", country, list_id)
-        return list_id
+        if created_list:
+            return created_list
+        raise RuntimeError(
+            f"Proxy-Seller API did not return resident list metadata after creation for country={country}. "
+            f"Payload: {response_payload!r}"
+        )
 
     def _request_json(self, method: str, endpoint: str, json_body: dict[str, Any] | None = None) -> Any:
         response = self._request(method=method, endpoint=endpoint, json_body=json_body)
@@ -360,15 +343,35 @@ class ProxyApi:
         if not isinstance(payload, dict):
             return
 
-        message_parts = [
+        errors = payload.get("errors")
+        if isinstance(errors, list):
+            for error_item in errors:
+                if isinstance(error_item, dict):
+                    error_message = str(error_item.get("message", "")).strip()
+                    error_code = error_item.get("code")
+                    if error_message:
+                        code_suffix = (
+                            f" (code={error_code})"
+                            if error_code is not None and str(error_code).strip()
+                            else ""
+                        )
+                        raise RuntimeError(
+                            f"Proxy-Seller API returned error payload on {endpoint}: {error_message}{code_suffix}"
+                        )
+                elif str(error_item).strip():
+                    raise RuntimeError(
+                        f"Proxy-Seller API returned error payload on {endpoint}: {str(error_item).strip()}"
+                    )
+
+        message_parts = (
             str(payload.get("message", "")).strip(),
             str(payload.get("error", "")).strip(),
             str(payload.get("detail", "")).strip(),
             str(payload.get("description", "")).strip(),
-        ]
+        )
         message = " ".join(part for part in message_parts if part).strip()
         status = str(payload.get("status", "")).strip().lower()
-        code = str(payload.get("code", "")).strip().lower()
+        code = str(payload.get("code", "")).strip()
         merged = f"{status} {code} {message}".lower()
 
         if any(chunk in merged for chunk in ("not enough balance", "empty balance", "insufficient balance")):
@@ -378,7 +381,9 @@ class ProxyApi:
             raise RuntimeError(f"Proxy-Seller API reported limit exceeded on {endpoint}: {message or payload!r}")
 
         if status in {"error", "fail", "failed"}:
-            raise RuntimeError(f"Proxy-Seller API returned error payload on {endpoint}: {payload!r}")
+            raise RuntimeError(
+                f"Proxy-Seller API returned error payload on {endpoint}: {message or payload!r}"
+            )
 
     def _extract_lists(self, payload: Any) -> list[dict[str, Any]]:
         if isinstance(payload, list):
@@ -387,29 +392,49 @@ class ProxyApi:
         if not isinstance(payload, dict):
             return []
 
-        data = payload.get("data", {})
+        data = payload.get("data")
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
         if isinstance(data, dict):
             items = data.get("items")
             if isinstance(items, list):
                 return [item for item in items if isinstance(item, dict)]
+            if self._extract_list_id(data):
+                return [data]
 
         for key in ("items", "lists", "result"):
             candidate = payload.get(key)
             if isinstance(candidate, list):
                 return [item for item in candidate if isinstance(item, dict)]
+            if isinstance(candidate, dict) and self._extract_list_id(candidate):
+                return [candidate]
         return []
 
     def _find_list_by_country(self, payload: Any, country: str) -> dict[str, Any] | None:
         resolved_code = self._normalize_country_token(country)
         for item in self._extract_lists(payload):
-            geo_data = item.get("geo", {})
-            if not isinstance(geo_data, dict):
-                continue
-            item_country = self._normalize_country_token(str(geo_data.get("country", "")).strip())
-            if not item_country or item_country != resolved_code:
-                continue
-            return item
+            item_country = self._extract_item_country_code(item)
+            if item_country and item_country == resolved_code:
+                return item
         return None
+
+    def _extract_item_country_code(self, item: dict[str, Any]) -> str:
+        def extract_from_value(value: Any) -> str:
+            if isinstance(value, str):
+                return self._normalize_country_token(value)
+            if isinstance(value, dict):
+                for key in ("country", "code", "iso", "iso2", "alpha2"):
+                    if key in value:
+                        nested = extract_from_value(value.get(key))
+                        if nested:
+                            return nested
+            return ""
+
+        for source in (item.get("geo"), item.get("country")):
+            extracted = extract_from_value(source)
+            if extracted:
+                return extracted
+        return ""
 
     def _find_list_by_id(self, payload: Any, list_id: str) -> dict[str, Any] | None:
         normalized_id = str(list_id or "").strip()
