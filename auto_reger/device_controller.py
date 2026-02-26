@@ -50,7 +50,59 @@ class DeviceController:
         "button1",
         "button_positive",
         "positive_button",
+        "next_button",
+        "done_button",
+        "ok_button",
         "login_btn",
+    )
+    START_MESSAGING_TEXT_CANDIDATES = (
+        "start messaging",
+        "\u043d\u0430\u0447\u0430\u0442\u044c \u043e\u0431\u0449\u0435\u043d\u0438\u0435",
+        "start",
+    )
+    PHONE_COUNTRY_CODE_RESOURCE_ID_SUFFIXES = (
+        "login_phone_code_text",
+        "phone_code",
+        "country_code",
+    )
+    PHONE_NUMBER_RESOURCE_ID_SUFFIXES = (
+        "login_phone_number_text",
+        "phone_input",
+        "phone_number",
+        "phone_field",
+    )
+    NEXT_DONE_TEXT_CANDIDATES = (
+        "done",
+        "next",
+        "\u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c",
+        "\u0434\u0430\u043b\u0435\u0435",
+    )
+    CODE_RESOURCE_ID_SUFFIXES = (
+        "login_code_text",
+        "code_field",
+        "login_code_field",
+    )
+    CODE_TEXT_CANDIDATES = (
+        "code",
+        "\u043a\u043e\u0434",
+        "verification code",
+        "sms code",
+    )
+    FIRST_NAME_RESOURCE_ID_SUFFIXES = (
+        "first_name_field",
+        "first_name",
+        "firstname",
+    )
+    LAST_NAME_RESOURCE_ID_SUFFIXES = (
+        "last_name_field",
+        "last_name",
+        "lastname",
+        "surname_field",
+    )
+    PROFILE_FINISH_TEXT_CANDIDATES = (
+        "done",
+        "finish",
+        "\u0433\u043e\u0442\u043e\u0432",
     )
 
     def __init__(self, device_id: str, adb_path: str = "adb") -> None:
@@ -590,14 +642,19 @@ class DeviceController:
         LOGGER.info("Launching Telegram on %s", self.device_id)
         self._adb(
             "shell",
-            "monkey",
-            "-p",
-            self.telegram_package,
+            "am",
+            "start",
+            "-a",
+            "android.intent.action.MAIN",
             "-c",
             "android.intent.category.LAUNCHER",
-            "1",
+            "-n",
+            f"{self.telegram_package}/org.telegram.messenger.ui.LaunchActivity",
+            check=False,
         )
         time.sleep(2.0)
+        if self._tap_by_text_candidates(self.START_MESSAGING_TEXT_CANDIDATES):
+            time.sleep(0.5)
 
     def open_telegram(self, package_name: Optional[str] = None) -> None:
         """
@@ -741,25 +798,24 @@ class DeviceController:
         :param country_code: Optional country code like ``+1``.
         """
         LOGGER.info("Inputting phone number on Telegram UI")
-        self._tap_by_text_candidates(("Start Messaging", "НАЧАТЬ ОБЩЕНИЕ", "Start"))
+        self._tap_by_text_candidates(self.START_MESSAGING_TEXT_CANDIDATES)
 
         if country_code:
             cc_digits = re.sub(r"\D", "", country_code)
-            if cc_digits:
-                if self._tap_telegram_resource("login_phone_code_text"):
-                    self._input_text(cc_digits)
-                    time.sleep(0.3)
+            if cc_digits and self._tap_telegram_resource_candidates(self.PHONE_COUNTRY_CODE_RESOURCE_ID_SUFFIXES):
+                self._input_text(cc_digits)
+                time.sleep(0.3)
 
         phone_digits = re.sub(r"\D", "", phone_number)
-        if self._tap_telegram_resource("login_phone_number_text"):
+        if self._tap_telegram_resource_candidates(self.PHONE_NUMBER_RESOURCE_ID_SUFFIXES):
             self._input_text(phone_digits)
         else:
             # TODO: calibrate coordinates for your Telegram build if no resource-id found.
             self._tap_percent(0.5, 0.42)
             self._input_text(phone_digits)
 
-        if not self._tap_telegram_resource("login_btn"):
-            self._tap_by_text_candidates(("Done", "Next", "Продолжить", "Далее"))
+        if not self._tap_telegram_resource_candidates(("login_btn", "next_button", "done_button", "ok_button")):
+            self._tap_by_text_candidates(self.NEXT_DONE_TEXT_CANDIDATES)
             self._adb("shell", "input", "keyevent", "66", check=False)
         time.sleep(1.5)
 
@@ -768,7 +824,10 @@ class DeviceController:
         Input verification SMS code in Telegram.
         """
         LOGGER.info("Inputting SMS code on Telegram UI")
-        if not self._tap_telegram_resource("login_code_text"):
+        code_field_tapped = self._tap_telegram_resource_candidates(self.CODE_RESOURCE_ID_SUFFIXES)
+        if not code_field_tapped:
+            code_field_tapped = self._tap_by_text_candidates(self.CODE_TEXT_CANDIDATES)
+        if not code_field_tapped:
             self._tap_percent(0.5, 0.36)
         self._input_text(str(code))
         self._adb("shell", "input", "keyevent", "66", check=False)
@@ -802,22 +861,22 @@ class DeviceController:
         Fill first/last name step in Telegram profile setup.
         """
         LOGGER.info("Filling Telegram profile name fields")
-        if self._tap_telegram_resource("first_name_field"):
+        if self._tap_telegram_resource_candidates(self.FIRST_NAME_RESOURCE_ID_SUFFIXES):
             self._input_text(first_name)
         else:
             # TODO: calibrate first-name field coordinates for your UI build.
             self._tap_percent(0.5, 0.32)
             self._input_text(first_name)
 
-        if self._tap_telegram_resource("last_name_field"):
+        if self._tap_telegram_resource_candidates(self.LAST_NAME_RESOURCE_ID_SUFFIXES):
             self._input_text(last_name)
         else:
             # TODO: calibrate last-name field coordinates for your UI build.
             self._tap_percent(0.5, 0.40)
             self._input_text(last_name)
 
-        if not self._tap_telegram_resource("login_btn"):
-            self._tap_by_text_candidates(("Done", "Next", "Continue", "Готово"))
+        if not self._tap_telegram_resource_candidates(("login_btn", "done_button", "next_button", "ok_button")):
+            self._tap_by_text_candidates(self.PROFILE_FINISH_TEXT_CANDIDATES)
         time.sleep(1.0)
 
     def open_telegram_system_chat(self) -> None:
@@ -910,6 +969,15 @@ class DeviceController:
     def _tap_telegram_resource(self, resource_name: str) -> bool:
         for resource_id in self._telegram_resource_id_candidates(resource_name):
             if self._tap_by_resource_id(resource_id):
+                return True
+        return False
+
+    def _tap_telegram_resource_candidates(self, resource_names: Iterable[str]) -> bool:
+        for resource_name in resource_names:
+            normalized = str(resource_name or "").strip()
+            if not normalized:
+                continue
+            if self._tap_telegram_resource(normalized):
                 return True
         return False
 
@@ -1090,3 +1158,4 @@ class DeviceController:
         Backward-compatible helper that returns current UI XML dump.
         """
         return self._dump_ui_xml()
+
