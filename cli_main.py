@@ -40,7 +40,6 @@ LAST_CYCLE_ALERT_AT: dict[str, float] = {}
 ALERT_SEND_LOCK = threading.Lock()
 
 ROUTINE_ALERT_SKIP_PATTERNS: tuple[str, ...] = (
-    "sms code not received",
     "sms status polling failed",
     "wait sms code",
     "rent sms number failed",

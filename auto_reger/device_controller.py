@@ -120,6 +120,8 @@ class DeviceController:
         self.debug_dir = PROJECT_ROOT / "debug"
         self._root_mode: Optional[str] = None
         self._root_checked = False
+        self._ui_xml_cache: Optional[str] = None
+        self._ui_root_cache: Optional[ET.Element] = None
 
     def _run_adb(self, *args: str, check: bool = True, timeout: int = 30) -> subprocess.CompletedProcess[str]:
         """
@@ -890,6 +892,7 @@ class DeviceController:
         :param country_code: Optional country code like ``+1``.
         """
         LOGGER.info("Inputting phone number on Telegram UI")
+        self.invalidate_ui_dump_cache()
         self._tap_by_text_candidates(self.START_MESSAGING_TEXT_CANDIDATES)
 
         if country_code:
@@ -909,6 +912,7 @@ class DeviceController:
         if not self._tap_telegram_resource_candidates(("login_btn", "next_button", "done_button", "ok_button")):
             self._tap_by_text_candidates(self.NEXT_DONE_TEXT_CANDIDATES)
             self._adb("shell", "input", "keyevent", "66", check=False)
+            self.invalidate_ui_dump_cache()
         time.sleep(1.5)
 
     def input_code(self, code: str) -> None:
@@ -916,6 +920,7 @@ class DeviceController:
         Input verification SMS code in Telegram.
         """
         LOGGER.info("Inputting SMS code on Telegram UI")
+        self.invalidate_ui_dump_cache()
         code_field_tapped = self._tap_telegram_resource_candidates(self.CODE_RESOURCE_ID_SUFFIXES)
         if not code_field_tapped:
             code_field_tapped = self._tap_by_text_candidates(self.CODE_TEXT_CANDIDATES)
@@ -923,6 +928,7 @@ class DeviceController:
             self._tap_percent(0.5, 0.36)
         self._input_text(str(code))
         self._adb("shell", "input", "keyevent", "66", check=False)
+        self.invalidate_ui_dump_cache()
         time.sleep(1.0)
 
     def input_email(self, email: str) -> None:
@@ -1131,12 +1137,37 @@ class DeviceController:
         ).stdout.lower()
         return "validated=true" in connectivity_dump or "connected" in connectivity_dump
 
+    def invalidate_ui_dump_cache(self) -> None:
+        """
+        Drop cached UI dump/root. Call before steps that are expected to change UI.
+        """
+        self._ui_xml_cache = None
+        self._ui_root_cache = None
+
     def _dump_ui_xml(self) -> str:
         self._adb("shell", "uiautomator", "dump", self.UI_DUMP_PATH, check=False)
         xml_text = self._adb("shell", "cat", self.UI_DUMP_PATH).stdout
         if not xml_text.strip():
             raise RuntimeError("uiautomator dump returned empty XML.")
         return xml_text
+
+    def _get_cached_ui_xml(self) -> str:
+        if self._ui_xml_cache is None:
+            self._ui_xml_cache = self._dump_ui_xml()
+            self._ui_root_cache = None
+        return self._ui_xml_cache
+
+    def _get_cached_ui_root(self) -> Optional[ET.Element]:
+        if self._ui_root_cache is not None:
+            return self._ui_root_cache
+        xml_text = self._get_cached_ui_xml()
+        try:
+            self._ui_root_cache = ET.fromstring(xml_text)
+        except ET.ParseError:
+            LOGGER.exception("Unable to parse cached UI dump XML")
+            self.invalidate_ui_dump_cache()
+            return None
+        return self._ui_root_cache
 
     @staticmethod
     def _parse_bounds(bounds: str) -> Optional[Tuple[int, int]]:
@@ -1149,11 +1180,8 @@ class DeviceController:
         return center_x, center_y
 
     def _tap_by_text_candidates(self, candidates: Iterable[str]) -> bool:
-        xml_text = self._dump_ui_xml()
-        try:
-            root = ET.fromstring(xml_text)
-        except ET.ParseError:
-            LOGGER.exception("Unable to parse UI dump XML while tapping by text")
+        root = self._get_cached_ui_root()
+        if root is None:
             return False
 
         normalized = [c.strip().lower() for c in candidates if str(c).strip()]
@@ -1173,11 +1201,8 @@ class DeviceController:
         return False
 
     def _tap_by_resource_id(self, resource_id: str) -> bool:
-        xml_text = self._dump_ui_xml()
-        try:
-            root = ET.fromstring(xml_text)
-        except ET.ParseError:
-            LOGGER.exception("Unable to parse UI dump XML while tapping by resource-id")
+        root = self._get_cached_ui_root()
+        if root is None:
             return False
 
         for node in root.iter("node"):
@@ -1219,6 +1244,7 @@ class DeviceController:
 
     def _tap(self, x: int, y: int) -> None:
         self._adb("shell", "input", "tap", str(x), str(y))
+        self.invalidate_ui_dump_cache()
 
     def _tap_percent(self, x_percent: float, y_percent: float) -> None:
         wm_size = self._adb("shell", "wm", "size").stdout
@@ -1236,6 +1262,7 @@ class DeviceController:
             return
         safe = self._escape_adb_text(text)
         self._adb("shell", "input", "text", safe)
+        self.invalidate_ui_dump_cache()
 
     @staticmethod
     def _escape_adb_text(text: str) -> str:
