@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import re
@@ -103,6 +103,117 @@ class DeviceController:
         "done",
         "finish",
         "\u0433\u043e\u0442\u043e\u0432",
+    )
+    CONTINUE_TEXT_CANDIDATES = (
+        "continue",
+        "continue in english",
+        "\u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c",
+        "\u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c \u043d\u0430 \u0430\u043d\u0433\u043b\u0438\u0439\u0441\u043a\u043e\u043c",
+        "\u0434\u0430\u043b\u0435\u0435",
+    )
+    YES_TEXT_CANDIDATES = (
+        "yes",
+        "\u0434\u0430",
+        "\u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c",
+    )
+    OK_TEXT_CANDIDATES = (
+        "ok",
+        "okay",
+        "\u043e\u043a",
+        "\u043f\u043e\u043d\u044f\u0442\u043d\u043e",
+    )
+    ACCEPT_TEXT_CANDIDATES = (
+        "accept",
+        "agree",
+        "\u043f\u0440\u0438\u043d\u044f\u0442\u044c",
+        "\u0441\u043e\u0433\u043b\u0430\u0441\u0435\u043d",
+    )
+    ALLOW_TEXT_CANDIDATES = (
+        "allow",
+        "allow only while using the app",
+        "while using the app",
+        "allow all the time",
+        "only this time",
+        "\u0440\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044c",
+        "\u0442\u043e\u043b\u044c\u043a\u043e \u043f\u0440\u0438 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043d\u0438\u0438",
+        "\u0440\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044c \u0432\u0441\u0435\u0433\u0434\u0430",
+        "\u0442\u043e\u043b\u044c\u043a\u043e \u0441\u0435\u0439\u0447\u0430\u0441",
+    )
+    ANDROID_ALLOW_RESOURCE_IDS = (
+        "android:id/button1",
+        "com.android.packageinstaller:id/permission_allow_button",
+        "com.android.permissioncontroller:id/permission_allow_button",
+        "com.android.permissioncontroller:id/permission_allow_foreground_only_button",
+        "com.android.permissioncontroller:id/permission_allow_always_button",
+        "com.android.permissioncontroller:id/permission_allow_one_time_button",
+    )
+    DIDNT_GET_CODE_TEXT_CANDIDATES = (
+        "didn't get the code",
+        "didnt get the code",
+        "did not get the code",
+        "\u043d\u0435 \u043f\u043e\u043b\u0443\u0447\u0438\u043b\u0438 \u043a\u043e\u0434",
+        "\u043d\u0435 \u043f\u0440\u0438\u0448\u0435\u043b \u043a\u043e\u0434",
+    )
+    EDIT_NUMBER_TEXT_CANDIDATES = (
+        "edit number",
+        "edit",
+        "\u0438\u0437\u043c\u0435\u043d\u0438\u0442\u044c \u043d\u043e\u043c\u0435\u0440",
+        "\u0438\u0437\u043c\u0435\u043d\u0438\u0442\u044c",
+    )
+    BACK_TEXT_CANDIDATES = (
+        "back",
+        "go back",
+        "\u043d\u0430\u0437\u0430\u0434",
+    )
+    NUMBER_BANNED_TEXT_CANDIDATES = (
+        "this phone number is banned",
+        "phone number is banned",
+        "\u044d\u0442\u043e\u0442 \u043d\u043e\u043c\u0435\u0440 \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d",
+        "\u043d\u043e\u043c\u0435\u0440 \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d",
+    )
+    TOO_MANY_ATTEMPTS_TEXT_CANDIDATES = (
+        "too many attempts",
+        "try again later",
+        "\u0441\u043b\u0438\u0448\u043a\u043e\u043c \u043c\u043d\u043e\u0433\u043e \u043f\u043e\u043f\u044b\u0442\u043e\u043a",
+        "\u043f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u043f\u043e\u0437\u0436\u0435",
+    )
+    EXISTING_ACCOUNT_TEXT_CANDIDATES = (
+        "check your telegram messages",
+        "check your email",
+        "\u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f telegram",
+        "\u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u043f\u043e\u0447\u0442\u0443",
+    )
+    TWO_FA_REQUIRED_TEXT_CANDIDATES = (
+        "two-step verification enabled",
+        "additional password",
+        "\u0434\u0432\u0443\u0445\u044d\u0442\u0430\u043f\u043d\u0430\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430",
+        "\u0434\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u0439 \u043f\u0430\u0440\u043e\u043b\u044c",
+    )
+    FORGOT_PASSWORD_TEXT_CANDIDATES = (
+        "forgot password",
+        "\u0437\u0430\u0431\u044b\u043b\u0438 \u043f\u0430\u0440\u043e\u043b\u044c",
+    )
+    RESET_ACCOUNT_TEXT_CANDIDATES = (
+        "reset account",
+        "\u0441\u0431\u0440\u043e\u0441\u0438\u0442\u044c \u0430\u043a\u043a\u0430\u0443\u043d\u0442",
+        "\u0441\u0431\u0440\u043e\u0441\u0438\u0442\u044c \u0443\u0447\u0435\u0442\u043d\u0443\u044e \u0437\u0430\u043f\u0438\u0441\u044c",
+    )
+    GET_CODE_VIA_SMS_TEXT_CANDIDATES = (
+        "get the code via sms",
+        "via sms",
+        "\u043f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u043a\u043e\u0434 \u043f\u043e sms",
+        "\u043f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u043a\u043e\u0434 \u043f\u043e \u0441\u043c\u0441",
+    )
+    SMS_FEE_TEXT_CANDIDATES = (
+        "sms fee",
+        "\u043f\u043b\u0430\u0442\u0430 \u0437\u0430 sms",
+        "\u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c sms",
+    )
+    EMAIL_FIELD_TEXT_CANDIDATES = (
+        "email",
+        "mail",
+        "\u043f\u043e\u0447\u0442",
+        "@",
     )
 
     def __init__(self, device_id: str, adb_path: str = "adb") -> None:
@@ -892,44 +1003,60 @@ class DeviceController:
         :param country_code: Optional country code like ``+1``.
         """
         LOGGER.info("Inputting phone number on Telegram UI")
-        self.invalidate_ui_dump_cache()
-        self._tap_by_text_candidates(self.START_MESSAGING_TEXT_CANDIDATES)
+        self._safe_tap_by_text_candidates(self.START_MESSAGING_TEXT_CANDIDATES, reason="start messaging")
+        self._safe_tap_by_text_candidates(self.CONTINUE_TEXT_CANDIDATES, reason="continue")
+        self._tap_system_allow_button()
 
         if country_code:
             cc_digits = re.sub(r"\D", "", country_code)
-            if cc_digits and self._tap_telegram_resource_candidates(self.PHONE_COUNTRY_CODE_RESOURCE_ID_SUFFIXES):
+            if cc_digits and self._safe_tap_telegram_resources(
+                self.PHONE_COUNTRY_CODE_RESOURCE_ID_SUFFIXES,
+                reason="country code field",
+            ):
                 self._input_text(cc_digits)
                 time.sleep(0.3)
 
         phone_digits = re.sub(r"\D", "", phone_number)
-        if self._tap_telegram_resource_candidates(self.PHONE_NUMBER_RESOURCE_ID_SUFFIXES):
+        if self._safe_tap_telegram_resources(self.PHONE_NUMBER_RESOURCE_ID_SUFFIXES, reason="phone number field"):
             self._input_text(phone_digits)
         else:
             # TODO: calibrate coordinates for your Telegram build if no resource-id found.
             self._tap_percent(0.5, 0.42)
             self._input_text(phone_digits)
 
-        if not self._tap_telegram_resource_candidates(("login_btn", "next_button", "done_button", "ok_button")):
-            self._tap_by_text_candidates(self.NEXT_DONE_TEXT_CANDIDATES)
+        if not self._safe_tap_telegram_resources(
+            ("login_btn", "next_button", "done_button", "ok_button"),
+            reason="submit phone number",
+        ):
+            self._safe_tap_by_text_candidates(self.NEXT_DONE_TEXT_CANDIDATES, reason="submit phone number")
             self._adb("shell", "input", "keyevent", "66", check=False)
             self.invalidate_ui_dump_cache()
-        time.sleep(1.5)
+        time.sleep(0.8)
+
+        self._safe_tap_by_text_candidates(self.YES_TEXT_CANDIDATES, reason="confirm phone number")
+        self._handle_post_action_popups(rounds=4, include_accept=False)
+        self._raise_for_auth_blockers(step_name="phone submission", include_existing_account=True)
 
     def input_code(self, code: str) -> None:
         """
         Input verification SMS code in Telegram.
         """
         LOGGER.info("Inputting SMS code on Telegram UI")
-        self.invalidate_ui_dump_cache()
-        code_field_tapped = self._tap_telegram_resource_candidates(self.CODE_RESOURCE_ID_SUFFIXES)
+        self._safe_tap_by_text_candidates(self.GET_CODE_VIA_SMS_TEXT_CANDIDATES, reason="request code via SMS")
+        code_field_tapped = self._safe_tap_telegram_resources(self.CODE_RESOURCE_ID_SUFFIXES, reason="code field")
         if not code_field_tapped:
-            code_field_tapped = self._tap_by_text_candidates(self.CODE_TEXT_CANDIDATES)
+            code_field_tapped = self._safe_tap_by_text_candidates(self.CODE_TEXT_CANDIDATES, reason="code field")
         if not code_field_tapped:
             self._tap_percent(0.5, 0.36)
         self._input_text(str(code))
         self._adb("shell", "input", "keyevent", "66", check=False)
         self.invalidate_ui_dump_cache()
         time.sleep(1.0)
+
+        self._handle_post_action_popups(rounds=2, include_accept=False)
+        self._handle_two_factor_reset_flow()
+        self._handle_post_action_popups(rounds=3, include_accept=False)
+        self._raise_for_auth_blockers(step_name="code confirmation", include_existing_account=False)
 
     def input_email(self, email: str) -> None:
         """
@@ -939,43 +1066,177 @@ class DeviceController:
         best-effort matching with a fallback tap.
         """
         LOGGER.info("Inputting email on Telegram UI")
-        known_resource_names = (
-            "email",
-            "login_email_field",
-            "code_field",
-        )
-
-        tapped = any(self._tap_telegram_resource(resource_name) for resource_name in known_resource_names)
+        known_resource_names = ("email", "login_email_field", "email_field")
+        tapped = self._safe_tap_telegram_resources(known_resource_names, reason="email field")
         if not tapped:
-            if not self._tap_by_text_candidates(("Email", "Почта", "@")):
+            if not self._safe_tap_by_text_candidates(self.EMAIL_FIELD_TEXT_CANDIDATES, reason="email field"):
                 # TODO: calibrate tap coordinates for email field if needed.
                 self._tap_percent(0.5, 0.42)
         self._input_text(email)
-        self._adb("shell", "input", "keyevent", "66", check=False)
-        time.sleep(1.0)
+        if not self._safe_tap_telegram_resources(
+            ("login_btn", "next_button", "done_button", "ok_button"),
+            reason="submit email",
+        ):
+            self._safe_tap_by_text_candidates(self.NEXT_DONE_TEXT_CANDIDATES, reason="submit email")
+            self._adb("shell", "input", "keyevent", "66", check=False)
+        time.sleep(0.8)
+
+        self._handle_post_action_popups(rounds=2, include_accept=False)
+        self._raise_for_auth_blockers(step_name="email submission", include_existing_account=False)
 
     def fill_profile(self, first_name: str, last_name: str) -> None:
         """
         Fill first/last name step in Telegram profile setup.
         """
         LOGGER.info("Filling Telegram profile name fields")
-        if self._tap_telegram_resource_candidates(self.FIRST_NAME_RESOURCE_ID_SUFFIXES):
+        if self._safe_tap_telegram_resources(self.FIRST_NAME_RESOURCE_ID_SUFFIXES, reason="first name field"):
             self._input_text(first_name)
         else:
             # TODO: calibrate first-name field coordinates for your UI build.
             self._tap_percent(0.5, 0.32)
             self._input_text(first_name)
 
-        if self._tap_telegram_resource_candidates(self.LAST_NAME_RESOURCE_ID_SUFFIXES):
+        if self._safe_tap_telegram_resources(self.LAST_NAME_RESOURCE_ID_SUFFIXES, reason="last name field"):
             self._input_text(last_name)
         else:
             # TODO: calibrate last-name field coordinates for your UI build.
             self._tap_percent(0.5, 0.40)
             self._input_text(last_name)
 
-        if not self._tap_telegram_resource_candidates(("login_btn", "done_button", "next_button", "ok_button")):
-            self._tap_by_text_candidates(self.PROFILE_FINISH_TEXT_CANDIDATES)
-        time.sleep(1.0)
+        if not self._safe_tap_telegram_resources(
+            ("login_btn", "done_button", "next_button", "ok_button"),
+            reason="submit profile name",
+        ):
+            self._safe_tap_by_text_candidates(self.PROFILE_FINISH_TEXT_CANDIDATES, reason="submit profile name")
+        time.sleep(0.8)
+
+        self._handle_post_action_popups(rounds=2, include_accept=True)
+        self._safe_tap_by_text_candidates(self.ACCEPT_TEXT_CANDIDATES, reason="accept terms popup")
+        self._safe_tap_by_text_candidates(self.CONTINUE_TEXT_CANDIDATES, reason="continue after profile")
+        self._tap_system_allow_button()
+        time.sleep(0.3)
+        self._tap_system_allow_button()
+        self._handle_post_action_popups(rounds=2, include_accept=False)
+        self._raise_for_auth_blockers(step_name="profile setup", include_existing_account=False)
+
+    def _safe_tap_by_text_candidates(self, candidates: Iterable[str], reason: str = "") -> bool:
+        self.invalidate_ui_dump_cache()
+        tapped = self._tap_by_text_candidates(candidates)
+        if tapped:
+            if reason:
+                LOGGER.debug("Tapped `%s` by text candidates", reason)
+            time.sleep(0.2)
+        return tapped
+
+    def _safe_tap_telegram_resources(self, resource_names: Iterable[str], reason: str = "") -> bool:
+        self.invalidate_ui_dump_cache()
+        tapped = self._tap_telegram_resource_candidates(resource_names)
+        if tapped:
+            if reason:
+                LOGGER.debug("Tapped `%s` by Telegram resource-id candidates", reason)
+            time.sleep(0.2)
+        return tapped
+
+    def _tap_system_allow_button(self) -> bool:
+        for resource_id in self.ANDROID_ALLOW_RESOURCE_IDS:
+            self.invalidate_ui_dump_cache()
+            if self._tap_by_resource_id(resource_id):
+                LOGGER.debug("Tapped Android allow button by resource-id `%s`", resource_id)
+                time.sleep(0.2)
+                return True
+        return self._safe_tap_by_text_candidates(self.ALLOW_TEXT_CANDIDATES, reason="android allow button")
+
+    def _handle_post_action_popups(self, rounds: int = 3, include_accept: bool = False) -> None:
+        max_rounds = max(int(rounds), 0)
+        for _ in range(max_rounds):
+            # 1. Сбрасываем кеш ровно ОДИН раз в начале раунда
+            self.invalidate_ui_dump_cache()
+            
+            tapped_any = False
+            
+            # 2. Используем базовые методы _tap_*, которые не сбрасывают кеш
+            if include_accept and self._tap_by_text_candidates(self.ACCEPT_TEXT_CANDIDATES):
+                LOGGER.debug("Tapped `accept` popup")
+                tapped_any = True
+            elif self._tap_by_text_candidates(self.YES_TEXT_CANDIDATES):
+                LOGGER.debug("Tapped `yes` popup")
+                tapped_any = True
+            elif self._tap_by_text_candidates(self.OK_TEXT_CANDIDATES):
+                LOGGER.debug("Tapped `ok` popup")
+                tapped_any = True
+            elif self._tap_by_text_candidates(self.CONTINUE_TEXT_CANDIDATES):
+                LOGGER.debug("Tapped `continue` popup")
+                tapped_any = True
+            else:
+                # Проверяем системные ID кнопок (используем базовый метод)
+                for resource_id in self.ANDROID_ALLOW_RESOURCE_IDS:
+                    if self._tap_by_resource_id(resource_id):
+                        LOGGER.debug("Tapped Android allow button by resource-id `%s`", resource_id)
+                        tapped_any = True
+                        break
+                
+                # Если системные ID не сработали, проверяем по тексту
+                if not tapped_any and self._tap_by_text_candidates(self.ALLOW_TEXT_CANDIDATES):
+                    LOGGER.debug("Tapped `allow` popup")
+                    tapped_any = True
+
+            # 3. Если мы ничего не нажали в этом раунде, значит попапов больше нет — выходим
+            if not tapped_any:
+                break
+                
+            # Если что-то нажали — ждем анимацию перед следующим дампом
+            time.sleep(1.0)
+
+    def _screen_contains_candidates(self, candidates: Iterable[str]) -> bool:
+        self.invalidate_ui_dump_cache()
+        return self.screen_contains_any(candidates)
+
+    def _handle_existing_account_fallback(self) -> None:
+        LOGGER.info("Handling existing-account fallback: trying `Didn't get the code?` and edit-number flow")
+        tapped_didnt_get_code = self._safe_tap_by_text_candidates(
+            self.DIDNT_GET_CODE_TEXT_CANDIDATES,
+            reason="didn't get code",
+        )
+        if tapped_didnt_get_code:
+            self._safe_tap_by_text_candidates(self.EDIT_NUMBER_TEXT_CANDIDATES, reason="edit number")
+
+        if self._safe_tap_by_text_candidates(self.BACK_TEXT_CANDIDATES, reason="back"):
+            self._safe_tap_by_text_candidates(self.EDIT_NUMBER_TEXT_CANDIDATES, reason="edit number")
+
+    def _raise_for_auth_blockers(self, step_name: str, *, include_existing_account: bool) -> None:
+        if self._screen_contains_candidates(self.NUMBER_BANNED_TEXT_CANDIDATES):
+            self._safe_tap_by_text_candidates(self.OK_TEXT_CANDIDATES, reason="banned number dialog")
+            raise RuntimeError(f"Telegram rejected number on `{step_name}`: phone number is banned.")
+
+        if self._screen_contains_candidates(self.TOO_MANY_ATTEMPTS_TEXT_CANDIDATES):
+            raise RuntimeError(f"Telegram blocked retries on `{step_name}`: too many attempts.")
+
+        if self._screen_contains_candidates(self.SMS_FEE_TEXT_CANDIDATES):
+            raise RuntimeError(f"Telegram requested paid SMS flow on `{step_name}`.")
+
+        if include_existing_account and self._screen_contains_candidates(self.EXISTING_ACCOUNT_TEXT_CANDIDATES):
+            self._handle_existing_account_fallback()
+            raise RuntimeError(
+                f"Phone number is already linked to Telegram on `{step_name}` (check Telegram messages/email screen)."
+            )
+
+    def _handle_two_factor_reset_flow(self) -> None:
+        if not self._screen_contains_candidates(self.TWO_FA_REQUIRED_TEXT_CANDIDATES):
+            return
+
+        LOGGER.warning("2FA password prompt detected, trying forgot-password/reset-account fallback flow")
+        forgot_tapped = self._safe_tap_by_text_candidates(
+            self.FORGOT_PASSWORD_TEXT_CANDIDATES,
+            reason="forgot password",
+        )
+        if not forgot_tapped:
+            LOGGER.warning("2FA prompt is present, but `Forgot password` button was not found")
+            return
+
+        self._safe_tap_by_text_candidates(self.RESET_ACCOUNT_TEXT_CANDIDATES, reason="reset account")
+        time.sleep(0.3)
+        self._safe_tap_by_text_candidates(self.RESET_ACCOUNT_TEXT_CANDIDATES, reason="reset account confirm")
+        self._handle_post_action_popups(rounds=3, include_accept=False)
 
     def open_telegram_system_chat(self) -> None:
         """
@@ -991,7 +1252,7 @@ class DeviceController:
             self._adb("shell", "input", "keyevent", "4", check=False)
             time.sleep(0.3)
 
-        if self._tap_by_text_candidates(("Telegram", "Телеграм")):
+        if self._tap_by_text_candidates(("Telegram", "\u0422\u0435\u043b\u0435\u0433\u0440\u0430\u043c")):
             time.sleep(0.8)
             return
 
@@ -1012,7 +1273,7 @@ class DeviceController:
         deadline = time.time() + timeout
         patterns = (
             re.compile(r"\b(\d{5})\b"),
-            re.compile(r"(?i)(?:code|код)[^\d]{0,20}(\d{5,6})"),
+            re.compile(r"(?i)(?:code|\u043a\u043e\u0434)[^\d]{0,20}(\d{5,6})"),
         )
 
         while time.time() < deadline:
