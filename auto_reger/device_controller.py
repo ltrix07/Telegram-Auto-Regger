@@ -314,19 +314,34 @@ class DeviceController:
 
     def take_screenshot(self, save_path: str) -> bool:
         """
-        Save a PNG screenshot to host filesystem using fast ``exec-out`` stream.
+        Save a PNG screenshot to host filesystem.
 
-        Command pattern:
+        Primary command:
           adb -s <device_udid> exec-out screencap -p > <save_path>
+
+        Fallback command sequence:
+          adb -s <device_udid> shell screencap -p /sdcard/screen.png
+          adb -s <device_udid> pull /sdcard/screen.png <save_path>
         """
         raw_path = str(save_path or "").strip()
         if not raw_path:
             LOGGER.error("Screenshot save path is empty for device %s", self.device_id)
             return False
         target_path = Path(raw_path)
+        remote_tmp_path = "/sdcard/screen.png"
 
-        try:
-            target_path.parent.mkdir(parents=True, exist_ok=True)
+        def _device_is_available() -> bool:
+            state_result = self._run_adb("get-state", check=False, timeout=10)
+            state = (state_result.stdout or "").strip().lower()
+            return state_result.returncode == 0 and state == "device"
+
+        def _reconnect_device() -> None:
+            if ":" not in self.device_id:
+                return
+            self._connect_network_device(check=False, timeout=20, log_attempt=False)
+            time.sleep(1.0)
+
+        def _capture_via_exec_out() -> bool:
             cmd = [self.adb_path, "-s", self.device_id, "exec-out", "screencap", "-p"]
             with target_path.open("wb") as output:
                 result = subprocess.run(
@@ -352,6 +367,83 @@ class DeviceController:
                 return False
 
             return True
+
+        def _capture_via_pull_fallback() -> bool:
+            shell_result = subprocess.run(
+                [self.adb_path, "-s", self.device_id, "shell", "screencap", "-p", remote_tmp_path],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if shell_result.returncode != 0:
+                LOGGER.error(
+                    "Fallback screenshot shell command failed on %s: %s",
+                    self.device_id,
+                    (shell_result.stderr or shell_result.stdout or "").strip(),
+                )
+                return False
+
+            pull_result = subprocess.run(
+                [self.adb_path, "-s", self.device_id, "pull", remote_tmp_path, str(target_path)],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            subprocess.run(
+                [self.adb_path, "-s", self.device_id, "shell", "rm", "-f", remote_tmp_path],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+
+            if pull_result.returncode != 0:
+                LOGGER.error(
+                    "Fallback screenshot pull command failed on %s: %s",
+                    self.device_id,
+                    (pull_result.stderr or pull_result.stdout or "").strip(),
+                )
+                target_path.unlink(missing_ok=True)
+                return False
+
+            if not target_path.exists() or target_path.stat().st_size == 0:
+                LOGGER.error("Fallback captured screenshot is empty for %s", self.device_id)
+                target_path.unlink(missing_ok=True)
+                return False
+
+            return True
+
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            if not _device_is_available():
+                LOGGER.warning(
+                    "Device %s is not available before screenshot capture. Attempting reconnect.",
+                    self.device_id,
+                )
+                _reconnect_device()
+
+            if _capture_via_exec_out():
+                return True
+
+            LOGGER.warning(
+                "Retrying screenshot capture via exec-out after reconnect on %s",
+                self.device_id,
+            )
+            _reconnect_device()
+            if _capture_via_exec_out():
+                return True
+
+            LOGGER.warning(
+                "exec-out screenshot failed on %s. Falling back to adb shell/pull method.",
+                self.device_id,
+            )
+            if _capture_via_pull_fallback():
+                return True
+
+            target_path.unlink(missing_ok=True)
+            return False
         except Exception:
             LOGGER.exception("Failed to capture screenshot for %s", self.device_id)
             try:

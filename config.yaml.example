@@ -29,7 +29,7 @@ concurrency:
 docker:
   compose_file: "docker-compose.yml"
   project_name: "auto_reger"
-  boot_timeout_seconds: 60
+  boot_timeout_seconds: 90
 
 sms_api:
   # Supported providers: "sms-activate", "grizzly-sms", "hero-sms"

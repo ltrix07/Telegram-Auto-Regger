@@ -90,7 +90,7 @@ class DockerAndroidController:
         """Stops and destroys Android container stack, including volumes."""
         self._run_compose(["down", "-v"], action="stop_container")
 
-    def wait_for_boot(self, device_udid: str, timeout: int = 60) -> None:
+    def wait_for_boot(self, device_udid: str, timeout: int = 90) -> None:
         """Waits until adb reports Android boot completion flag as 1."""
         normalized_udid = str(device_udid or "").strip()
         if not normalized_udid:

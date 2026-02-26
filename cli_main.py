@@ -314,6 +314,8 @@ def maybe_send_cycle_error_alert(
     device: Optional[DeviceController],
     exc: BaseException,
     error_trace: str,
+    screenshot_path: Optional[str] = None,
+    screenshot_failed: bool = False,
 ) -> None:
     if not notifier:
         return
@@ -337,16 +339,27 @@ def maybe_send_cycle_error_alert(
         )
         return
 
-    screenshot_path: Optional[str] = None
-    try:
-        if device:
-            path = _build_debug_screenshot_path(device.device_id, reason=f"cycle_{cycle_index}_alert")
-            if device.take_screenshot(str(path)):
-                screenshot_path = str(path)
-        elif device_id:
-            screenshot_path = take_alert_screenshot(device_id=device_id, reason=f"cycle_{cycle_index}_alert")
-    except Exception:
-        LOGGER.exception("Failed to capture cycle alert screenshot on %s", device_id or "unknown")
+    resolved_screenshot_path = screenshot_path
+    screenshot_capture_failed = screenshot_failed
+    if resolved_screenshot_path is None and not screenshot_capture_failed:
+        try:
+            if device:
+                path = _build_debug_screenshot_path(device.device_id, reason=f"cycle_{cycle_index}_alert")
+                if device.take_screenshot(str(path)):
+                    resolved_screenshot_path = str(path)
+                else:
+                    screenshot_capture_failed = True
+            elif device_id:
+                resolved_screenshot_path = take_alert_screenshot(
+                    device_id=device_id,
+                    reason=f"cycle_{cycle_index}_alert",
+                )
+                screenshot_capture_failed = resolved_screenshot_path is None
+            else:
+                screenshot_capture_failed = True
+        except Exception:
+            screenshot_capture_failed = True
+            LOGGER.exception("Failed to capture cycle alert screenshot on %s", device_id or "unknown")
 
     alert_text = (
         f"Cycle {cycle_index}/{total_cycles} unexpected failure on {device_id or 'unknown'}\n"
@@ -354,8 +367,14 @@ def maybe_send_cycle_error_alert(
         f"Message: {exc}\n\n"
         f"Traceback:\n{error_trace}"
     )
+    if screenshot_capture_failed and not resolved_screenshot_path:
+        alert_text += "\n[System]: Screenshot failed (Device Offline)"
+
     with ALERT_SEND_LOCK:
-        sent = notifier.send_error_alert(error_message=alert_text, screenshot_path=screenshot_path)
+        sent = notifier.send_error_alert(
+            error_message=alert_text,
+            screenshot_path=resolved_screenshot_path,
+        )
     if sent:
         LOGGER.info("Cycle alert sent to Telegram for cycle %s on %s", cycle_index, device_id or "unknown")
     else:
@@ -636,16 +655,16 @@ def build_docker_controller_from_config() -> tuple[DockerAndroidController, int]
 
     compose_file = str(docker_cfg.get("compose_file", "docker-compose.yml")).strip()
     project_name = str(docker_cfg.get("project_name", "auto_reger")).strip()
-    boot_timeout_raw = docker_cfg.get("boot_timeout_seconds", 60)
+    boot_timeout_raw = docker_cfg.get("boot_timeout_seconds", 90)
 
     try:
         boot_timeout_seconds = int(boot_timeout_raw)
     except (TypeError, ValueError):
         LOGGER.warning(
-            "Invalid docker.boot_timeout_seconds=%r; using default 60",
+            "Invalid docker.boot_timeout_seconds=%r; using default 90",
             boot_timeout_raw,
         )
-        boot_timeout_seconds = 60
+        boot_timeout_seconds = 90
 
     boot_timeout_seconds = max(boot_timeout_seconds, 5)
     controller = DockerAndroidController(
@@ -833,6 +852,27 @@ def run_single_cycle(
     except ShutdownRequested:
         LOGGER.info("Cycle %s interrupted by shutdown", cycle_index)
     except Exception as exc:
+        screenshot_path: Optional[str] = None
+        screenshot_failed = False
+        try:
+            if device:
+                path = _build_debug_screenshot_path(device.device_id, reason=f"cycle_{cycle_index}_alert")
+                if device.take_screenshot(str(path)):
+                    screenshot_path = str(path)
+                else:
+                    screenshot_failed = True
+            elif device_id:
+                screenshot_path = take_alert_screenshot(
+                    device_id=device_id,
+                    reason=f"cycle_{cycle_index}_alert",
+                )
+                screenshot_failed = screenshot_path is None
+            else:
+                screenshot_failed = True
+        except Exception:
+            screenshot_failed = True
+            LOGGER.exception("Failed to capture cycle error screenshot on %s", device_id or "unknown")
+
         if _is_routine_cycle_error(exc):
             LOGGER.exception(
                 "Cycle %s/%s failed with routine error on device %s",
@@ -855,6 +895,8 @@ def run_single_cycle(
             device=device,
             exc=exc,
             error_trace=traceback.format_exc(),
+            screenshot_path=screenshot_path,
+            screenshot_failed=screenshot_failed,
         )
     finally:
         if activation_id:
