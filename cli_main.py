@@ -18,7 +18,7 @@ from typing import Any, Dict, Iterable, Optional, Tuple
 
 from auto_reger.device_controller import DeviceController
 from auto_reger.emulator import DockerAndroidController
-from auto_reger.email_api import EmailApi
+from auto_reger.email_api import EmailApi, EmailAuthorizationError, NoEmailsLeftError
 from auto_reger.notifier import TelegramNotifier
 from auto_reger.proxy_api import ProxyApi
 from auto_reger.session_generator import SessionGenerator
@@ -177,15 +177,48 @@ def build_sms_api() -> SmsApi:
     return SmsApi(service=service_name, api_key_path=str(resolved_key_path), api_url=api_url)
 
 
-def build_email_api() -> Optional[EmailApi]:
+def build_email_api() -> EmailApi:
     email_cfg = CONFIG.get("email_api", {})
-    token = (
-        str(email_cfg.get("kopeechka_api_token", "")).strip()
-        or str(email_cfg.get("api_token", "")).strip()
+    emails_file_raw = str(email_cfg.get("emails_file", "emails.txt")).strip() or "emails.txt"
+    resolved_emails_file = resolve_project_path(emails_file_raw)
+
+    poll_interval_raw = email_cfg.get("poll_interval_seconds", 7.0)
+    try:
+        poll_interval_seconds = float(poll_interval_raw or 7.0)
+    except (TypeError, ValueError):
+        LOGGER.error(
+            "Invalid email_api.poll_interval_seconds=%r, fallback to 7.0",
+            poll_interval_raw,
+        )
+        poll_interval_seconds = 7.0
+
+    imap_timeout_raw = email_cfg.get("imap_timeout_seconds", 20)
+    try:
+        imap_timeout_seconds = int(imap_timeout_raw or 20)
+    except (TypeError, ValueError):
+        LOGGER.error(
+            "Invalid email_api.imap_timeout_seconds=%r, fallback to 20",
+            imap_timeout_raw,
+        )
+        imap_timeout_seconds = 20
+
+    max_messages_raw = email_cfg.get("max_messages_to_scan", 30)
+    try:
+        max_messages_to_scan = int(max_messages_raw or 30)
+    except (TypeError, ValueError):
+        LOGGER.error(
+            "Invalid email_api.max_messages_to_scan=%r, fallback to 30",
+            max_messages_raw,
+        )
+        max_messages_to_scan = 30
+
+    LOGGER.info("Initializing local EmailApi with emails file: %s", resolved_emails_file)
+    return EmailApi(
+        emails_file=str(resolved_emails_file),
+        poll_interval_seconds=poll_interval_seconds,
+        imap_timeout_seconds=imap_timeout_seconds,
+        max_messages_to_scan=max_messages_to_scan,
     )
-    if not token:
-        return None
-    return EmailApi(api_token=token)
 
 
 def build_session_generator() -> SessionGenerator:
@@ -416,14 +449,53 @@ def take_alert_screenshot(device_id: str, reason: str = "fatal_error") -> Option
 def maybe_handle_email_step(device: DeviceController, email_api: Optional[EmailApi]) -> None:
     if not email_api:
         return
-    if not device.screen_contains_any(("email", "mail", "почт")):
+
+    email_screen_patterns = (
+        "check your email",
+        "email",
+        "e-mail",
+        "mail",
+        "почт",
+    )
+    email_resource_markers = (
+        "email_field",
+        "login_email_field",
+        ":id/email",
+    )
+
+    email_step_detected = device._screen_contains_candidates(email_screen_patterns)
+    if not email_step_detected:
+        try:
+            ui_xml = device._dump_ui_xml().lower()
+            email_step_detected = any(marker in ui_xml for marker in email_resource_markers)
+        except Exception:
+            LOGGER.debug("Email step pre-check XML dump failed", exc_info=True)
+
+    if not email_step_detected:
+        LOGGER.info("Email step is not required by Telegram, skipping...")
         return
 
-    LOGGER.info("Email challenge detected. Requesting temporary mailbox.")
-    task_id, email_address = email_api.get_email(site="telegram.org", mail_type="OUTLOOK")
-    device.input_email(email_address)
-    email_code = email_api.wait_for_email_code(task_id=task_id, timeout=120)
-    device.input_code(email_code)
+    LOGGER.info("Email challenge detected. Taking local email credentials from file.")
+    email_address: Optional[str] = None
+    try:
+        email_address, email_password = email_api.get_email()
+        LOGGER.info("Inputting email to Telegram: %s", email_address)
+        device.input_email(email_address)
+        email_code = email_api.wait_for_email_code(email_address=email_address, password=email_password, timeout=120)
+        LOGGER.info("Submitting email verification code for %s", email_address)
+        device.input_code(email_code)
+    except NoEmailsLeftError as exc:
+        LOGGER.error("No emails left: %s", exc)
+        return
+    except EmailAuthorizationError as exc:
+        if email_address:
+            LOGGER.error("IMAP authorization failed for %s: %s", email_address, exc)
+        else:
+            LOGGER.error("IMAP authorization failed: %s", exc)
+        return
+    except Exception:
+        LOGGER.exception("Failed to complete Telegram email verification step.")
+        raise
 
 
 def maybe_fill_profile_step(device: DeviceController, last_names: list[str]) -> None:
@@ -823,6 +895,7 @@ def run_single_cycle(
 
         device.launch_telegram()
         device.input_phone(phone_number=phone_number, country_code=country_guess)
+        maybe_handle_email_step(device=device, email_api=email_api)
 
         sms_code = wait_sms_code(sms_api, activation_id=activation_id)
         if not sms_code:
@@ -831,7 +904,6 @@ def run_single_cycle(
         _check_shutdown(stop_event)
 
         device.input_code(sms_code)
-        maybe_handle_email_step(device=device, email_api=email_api)
         maybe_fill_profile_step(device=device, last_names=last_names)
 
         session_path = session_generator.generate_session(

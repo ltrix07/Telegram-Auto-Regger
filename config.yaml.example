@@ -43,6 +43,16 @@ sms_api:
   # USA regular pool for sms-activate compatible APIs
   country_id: 187
 
+email_api:
+  # Local file with mailbox credentials. One line = login:pass
+  emails_file: "emails.txt"
+  # IMAP polling interval in seconds (actual minimum in code is 5s)
+  poll_interval_seconds: 7.0
+  # IMAP socket timeout in seconds
+  imap_timeout_seconds: 20
+  # How many latest INBOX messages are scanned per poll iteration
+  max_messages_to_scan: 30
+
 proxy_api:
   key: "YOUR_PROXY_SELLER_API_KEY"
   url: "https://proxy-seller.com/api/v1/proxy/list"
