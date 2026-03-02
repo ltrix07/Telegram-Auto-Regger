@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import logging
+import random
 import re
 import shlex
 import subprocess
@@ -1553,8 +1554,10 @@ class DeviceController:
         text = str(value)
         if not text:
             return
-        safe = self._escape_adb_text(text)
-        self._adb("shell", "input", "text", safe)
+        for char in text:
+            safe_char = self._escape_adb_text(char)
+            self._adb("shell", "input", "text", safe_char)
+            time.sleep(random.uniform(0.05, 0.25))
         self.invalidate_ui_dump_cache()
 
     @staticmethod
