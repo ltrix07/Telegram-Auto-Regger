@@ -95,3 +95,59 @@ class TelegramNotifier:
         except Exception:
             LOGGER.exception("Unexpected error while sending Telegram alert.")
             return False
+
+    def send_video_alert(self, error_message: str, video_path: str) -> bool:
+        """
+        Send critical alert with MP4 video to Telegram.
+
+        Uses ``sendVideo`` when file exists; falls back to ``sendMessage`` on failure.
+        """
+        caption = self._truncate_caption(error_message)
+
+        try:
+            if video_path:
+                image_file = Path(str(video_path).strip())
+                if image_file.exists() and image_file.is_file():
+                    with image_file.open("rb") as video:
+                        response = self._session.post(
+                            f"{self._api_base}/sendVideo",
+                            data={
+                                "chat_id": self.chat_id,
+                                "caption": caption,
+                            },
+                            files={"video": (image_file.name, video, "video/mp4")},
+                            timeout=self.timeout + 30.0,
+                        )
+                    if response.ok:
+                        return True
+                    LOGGER.error(
+                        "Telegram sendVideo failed: status=%s body=%s",
+                        response.status_code,
+                        (response.text or "")[:500],
+                    )
+                else:
+                    LOGGER.warning("Video file not found for alert: %s", image_file)
+
+            response = self._session.post(
+                f"{self._api_base}/sendMessage",
+                data={
+                    "chat_id": self.chat_id,
+                    "text": caption,
+                },
+                timeout=self.timeout,
+            )
+            if response.ok:
+                return True
+
+            LOGGER.error(
+                "Telegram sendMessage failed: status=%s body=%s",
+                response.status_code,
+                (response.text or "")[:500],
+            )
+            return False
+        except requests.RequestException:
+            LOGGER.exception("Network error while sending Telegram video alert.")
+            return False
+        except Exception:
+            LOGGER.exception("Unexpected error while sending Telegram video alert.")
+            return False

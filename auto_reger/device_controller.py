@@ -598,6 +598,33 @@ class DeviceController:
                 LOGGER.exception("Failed to cleanup invalid screenshot file: %s", target_path)
             return False
 
+    def start_recording(self, remote_path: str = "/sdcard/debug_reg.mp4") -> subprocess.Popen:
+        cmd = [
+            self.adb_path,
+            "-s",
+            self.device_id,
+            "shell",
+            "screenrecord",
+            "--bit-rate",
+            "1000000",
+            remote_path,
+        ]
+        return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def stop_recording_and_pull(self, proc: subprocess.Popen, remote_path: str, local_path: str) -> bool:
+        self._adb("shell", "kill -2 $(pidof screenrecord)", check=False, timeout=5)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+        time.sleep(1.5)
+        self._adb("pull", remote_path, local_path, check=False, timeout=30)
+        self._adb("shell", "rm", "-f", remote_path, check=False, timeout=5)
+
+        target = Path(local_path)
+        return target.exists() and target.stat().st_size > 0
+
     def set_proxy(self, proxy_string: str) -> None:
         """
         Configure Android global proxy from ``type:ip:port:user:pass`` string.

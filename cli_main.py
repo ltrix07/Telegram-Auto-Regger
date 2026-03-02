@@ -347,6 +347,7 @@ def maybe_send_cycle_error_alert(
     device: Optional[DeviceController],
     exc: BaseException,
     error_trace: str,
+    video_path: Optional[str] = None,
     screenshot_path: Optional[str] = None,
     screenshot_failed: bool = False,
 ) -> None:
@@ -402,6 +403,25 @@ def maybe_send_cycle_error_alert(
     )
     if screenshot_capture_failed and not resolved_screenshot_path:
         alert_text += "\n[System]: Screenshot failed (Device Offline)"
+
+    if video_path:
+        with ALERT_SEND_LOCK:
+            sent_video = notifier.send_video_alert(
+                error_message=alert_text,
+                video_path=video_path,
+            )
+        if sent_video:
+            LOGGER.info(
+                "Cycle video alert sent to Telegram for cycle %s on %s",
+                cycle_index,
+                device_id or "unknown",
+            )
+            return
+        LOGGER.warning(
+            "Cycle video alert delivery failed for cycle %s on %s. Falling back to screenshot alert.",
+            cycle_index,
+            device_id or "unknown",
+        )
 
     with ALERT_SEND_LOCK:
         sent = notifier.send_error_alert(
@@ -794,6 +814,8 @@ def run_single_cycle(
     docker_controller: Optional[DockerAndroidController] = None
     email_api: Optional[EmailApi] = None
     session_generator: Optional[SessionGenerator] = None
+    record_proc = None
+    remote_video_path = "/sdcard/cycle_record.mp4"
     activation_id = ""
     phone_number = ""
     cycle_success = False
@@ -847,6 +869,7 @@ def run_single_cycle(
         session_generator = build_session_generator()
 
         device.connect()
+        record_proc = device.start_recording(remote_video_path)
         if not device.is_ready():
             raise RuntimeError(f"Device {device_id} is not ready for registration.")
 
@@ -949,6 +972,15 @@ def run_single_cycle(
     except ShutdownRequested:
         LOGGER.info("Cycle %s interrupted by shutdown", cycle_index)
     except Exception as exc:
+        video_path: Optional[str] = None
+        if record_proc and device:
+            local_video = _build_debug_screenshot_path(
+                device.device_id,
+                reason=f"cycle_{cycle_index}_video",
+            ).with_suffix(".mp4")
+            if device.stop_recording_and_pull(record_proc, remote_video_path, str(local_video)):
+                video_path = str(local_video)
+
         screenshot_path: Optional[str] = None
         screenshot_failed = False
         try:
@@ -992,10 +1024,30 @@ def run_single_cycle(
             device=device,
             exc=exc,
             error_trace=traceback.format_exc(),
+            video_path=video_path,
             screenshot_path=screenshot_path,
             screenshot_failed=screenshot_failed,
         )
     finally:
+        if cycle_success and record_proc:
+            try:
+                if record_proc.poll() is None:
+                    record_proc.kill()
+            except Exception:
+                LOGGER.exception(
+                    "Failed to stop cycle screenrecord process for cycle %s on %s",
+                    cycle_index,
+                    device_id or "unknown",
+                )
+            if device:
+                try:
+                    device._adb("shell", "rm", "-f", remote_video_path, check=False, timeout=5)
+                except Exception:
+                    LOGGER.exception(
+                        "Failed to cleanup remote cycle video on %s",
+                        device.device_id,
+                    )
+
         if activation_id:
             try:
                 cancel_activation_safe(sms_api, activation_id, force=stop_event.is_set())
