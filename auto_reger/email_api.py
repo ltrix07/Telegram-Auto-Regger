@@ -335,11 +335,11 @@ class EmailApi:
 
     @staticmethod
     def _parse_login_password(line: str) -> Tuple[str, str]:
-        if ":" not in line:
+        parts = [chunk.strip() for chunk in str(line).split(":")]
+        if len(parts) < 2:
             return "", ""
-        login, password = line.split(":", 1)
-        login = login.strip()
-        password = password.strip()
+        login = parts[0]
+        password = parts[1]
         if not login or not password:
             return "", ""
         if "@" not in login:

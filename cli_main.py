@@ -492,7 +492,7 @@ def maybe_handle_email_step(device: DeviceController, email_api: Optional[EmailA
             LOGGER.error("IMAP authorization failed for %s: %s", email_address, exc)
         else:
             LOGGER.error("IMAP authorization failed: %s", exc)
-        return
+        raise RuntimeError(f"Email step failed: {exc}") from exc
     except Exception:
         LOGGER.exception("Failed to complete Telegram email verification step.")
         raise
