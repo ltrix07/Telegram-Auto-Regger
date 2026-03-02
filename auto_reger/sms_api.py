@@ -592,7 +592,7 @@ class SmsApi(SMSActivateAPI):
     def check_verif_status(
         self,
         activation_id: str,
-        timeout: int = 300,
+        timeout: int = 180,
         poll_interval: int = 5,
     ) -> str:
         """

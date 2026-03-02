@@ -41,6 +41,7 @@ ALERT_SEND_LOCK = threading.Lock()
 
 ROUTINE_ALERT_SKIP_PATTERNS: tuple[str, ...] = (
     "sms status polling failed",
+    "sms code not received",
     "wait sms code",
     "rent sms number failed",
     "no free numbers",
@@ -1095,28 +1096,47 @@ def run(notifier: Optional[TelegramNotifier] = None) -> int:
     last_names = load_profile_names()
 
     success_count = 0
-    futures: list[Future[CycleResult]] = []
+    attempt_count = 0
+    max_attempts = args.count * 15
 
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="reg-worker") as executor:
-        for cycle_index in range(1, args.count + 1):
-            futures.append(
-                executor.submit(
-                    run_single_cycle,
-                    cycle_index,
-                    args.count,
-                    stop_event=STOP_EVENT,
-                    device_pool=device_pool,
-                    proxy_api=shared_proxy_api,
-                    sms_api=shared_sms_api,
-                    last_names=last_names,
-                    notifier=runtime_notifier,
-                )
-            )
+        pending: set[Future[CycleResult]] = set()
 
-        pending: set[Future[CycleResult]] = set(futures)
+        def _spawn_needed() -> None:
+            nonlocal attempt_count
+            if STOP_EVENT.is_set():
+                return
+
+            needed = args.count - success_count
+            active = len(pending)
+
+            while (
+                needed > active
+                and active < workers
+                and attempt_count < max_attempts
+                and not STOP_EVENT.is_set()
+            ):
+                attempt_count += 1
+                pending.add(
+                    executor.submit(
+                        run_single_cycle,
+                        attempt_count,
+                        max_attempts,
+                        stop_event=STOP_EVENT,
+                        device_pool=device_pool,
+                        proxy_api=shared_proxy_api,
+                        sms_api=shared_sms_api,
+                        last_names=last_names,
+                        notifier=runtime_notifier,
+                    )
+                )
+                active += 1
+
+        _spawn_needed()
         while pending:
-            done, pending = wait(pending, timeout=1.0, return_when=FIRST_COMPLETED)
+            done, _ = wait(pending, timeout=1.0, return_when=FIRST_COMPLETED)
             for future in done:
+                pending.discard(future)
                 if future.cancelled():
                     continue
                 try:
@@ -1125,14 +1145,21 @@ def run(notifier: Optional[TelegramNotifier] = None) -> int:
                     continue
                 except Exception:
                     LOGGER.exception("Worker future failed unexpectedly")
+                    if success_count < args.count:
+                        _spawn_needed()
                     continue
-                if result.success:
+                if result.success is True:
                     success_count += 1
+                elif success_count < args.count:
+                    _spawn_needed()
 
             if STOP_EVENT.is_set() and pending:
                 for future in list(pending):
                     if future.cancel():
                         pending.remove(future)
+
+            if not STOP_EVENT.is_set() and success_count < args.count:
+                _spawn_needed()
 
     cancel_remaining_activations(shared_sms_api)
 
