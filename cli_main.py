@@ -485,6 +485,19 @@ def maybe_handle_email_step(device: DeviceController, email_api: Optional[EmailA
 
     if not email_step_detected:
         LOGGER.info("Email step is not required by Telegram, skipping...")
+        
+        # --- ДОБАВЬ ЭТОТ БЛОК ДЛЯ ДЕБАГА ---
+        try:
+            import time
+            stamp = int(time.time())
+            device.take_screenshot(f"/app/debug_email_skip_{stamp}.png")
+            with open(f"/app/debug_email_skip_{stamp}.xml", "w", encoding="utf-8") as f:
+                f.write(device._dump_ui_xml())
+            LOGGER.info(f"Saved debug screenshot and XML to /app/debug_email_skip_{stamp}")
+        except Exception as e:
+            LOGGER.error(f"Failed to save debug info: {e}")
+        # -----------------------------------
+        
         return
 
     LOGGER.info("Email challenge detected. Taking local email credentials from file.")
