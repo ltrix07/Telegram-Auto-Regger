@@ -309,45 +309,62 @@ class DeviceController:
 
         self._root_checked = True
         self._root_mode = None
+        max_attempts = 4
+        last_adbd_probe: Optional[subprocess.CompletedProcess[str]] = None
+        last_su_probe: Optional[subprocess.CompletedProcess[str]] = None
 
-        self._run_adb("root", check=False, timeout=20)
-        time.sleep(2.0)
+        for attempt in range(1, max_attempts + 1):
+            LOGGER.info("Ensuring root access on %s (attempt %d/%d)", self.device_id, attempt, max_attempts)
 
-        LOGGER.info("Waiting for device to reconnect after adb root...")
-        reconnect_deadline = time.monotonic() + 20.0
-        reconnected = False
-        while time.monotonic() < reconnect_deadline:
+            self._run_adb("root", check=False, timeout=20)
+            time.sleep(2.5)
+
             if ":" in self.device_id:
-                self._connect_network_device(check=False, timeout=10, log_attempt=False)
+                self._connect_network_device(check=False, timeout=15, log_attempt=False)
 
-            state_result = self._run_adb("get-state", check=False, timeout=5)
-            state = state_result.stdout.strip().lower()
-            if state_result.returncode == 0 and state == "device":
-                reconnected = True
-                break
+            wait_result = self._run_adb("wait-for-device", check=False, timeout=20)
+            if wait_result.returncode != 0:
+                LOGGER.warning(
+                    "wait-for-device failed on %s (attempt %d/%d): %s",
+                    self.device_id,
+                    attempt,
+                    max_attempts,
+                    (wait_result.stderr or wait_result.stdout or "").strip(),
+                )
+                time.sleep(1.0)
+                continue
 
+            last_adbd_probe = self._run_adb("shell", "id", check=False, timeout=10)
+            adbd_stdout = (last_adbd_probe.stdout or "").strip()
+            if last_adbd_probe.returncode == 0 and "uid=0" in adbd_stdout:
+                self._root_mode = "adbd"
+                LOGGER.info("Root mode for %s: adbd", self.device_id)
+                return
+
+            last_su_probe = self._run_adb("shell", "su", "-c", "id", check=False, timeout=10)
+            su_stdout = (last_su_probe.stdout or "").strip()
+            if last_su_probe.returncode == 0 and "uid=0" in su_stdout:
+                self._root_mode = "su"
+                LOGGER.info("Root mode for %s: su", self.device_id)
+                return
+
+            LOGGER.warning(
+                "Root probe failed on %s (attempt %d/%d): adbd=%r su=%r",
+                self.device_id,
+                attempt,
+                max_attempts,
+                adbd_stdout,
+                su_stdout,
+            )
             time.sleep(1.0)
 
-        if not reconnected:
-            LOGGER.warning("Device %s did not reconnect to `device` state after adb root", self.device_id)
-
-        adbd_probe = self._run_adb("shell", "id", "-u", check=False, timeout=10)
-        if adbd_probe.returncode == 0 and adbd_probe.stdout.strip() == "0":
-            self._root_mode = "adbd"
-            LOGGER.info("Root mode for %s: adbd", self.device_id)
-            return
-
-        su_probe = self._run_adb("shell", "su", "-c", "id -u", check=False, timeout=10)
-        if su_probe.returncode == 0 and su_probe.stdout.strip() == "0":
-            self._root_mode = "su"
-            LOGGER.info("Root mode for %s: su", self.device_id)
-            return
-
+        adbd_stdout = (last_adbd_probe.stdout or "").strip() if last_adbd_probe else ""
+        su_stdout = (last_su_probe.stdout or "").strip() if last_su_probe else ""
         raise RuntimeError(
             "Root access is required but unavailable on {} (adbd stdout={!r}, su stdout={!r})".format(
                 self.device_id,
-                (adbd_probe.stdout or "").strip(),
-                (su_probe.stdout or "").strip(),
+                adbd_stdout,
+                su_stdout,
             )
         )
 
@@ -1538,4 +1555,3 @@ class DeviceController:
         Backward-compatible helper that returns current UI XML dump.
         """
         return self._dump_ui_xml()
-
