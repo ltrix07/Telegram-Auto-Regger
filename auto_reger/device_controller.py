@@ -317,12 +317,27 @@ class DeviceController:
             LOGGER.info("Ensuring root access on %s (attempt %d/%d)", self.device_id, attempt, max_attempts)
 
             self._run_adb("root", check=False, timeout=20)
-            time.sleep(2.5)
+            time.sleep(3)
 
             if ":" in self.device_id:
+                subprocess.run(
+                    [self.adb_path, "disconnect", self.device_id],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
                 self._connect_network_device(check=False, timeout=15, log_attempt=False)
 
-            wait_result = self._run_adb("wait-for-device", check=False, timeout=20)
+            try:
+                wait_result = self._run_adb("wait-for-device", check=False, timeout=20)
+            except subprocess.TimeoutExpired:
+                LOGGER.warning(
+                    "wait-for-device timed out on %s (attempt %d/%d)",
+                    self.device_id,
+                    attempt,
+                    max_attempts,
+                )
+                continue
             if wait_result.returncode != 0:
                 LOGGER.warning(
                     "wait-for-device failed on %s (attempt %d/%d): %s",
