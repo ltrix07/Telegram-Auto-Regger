@@ -24,6 +24,7 @@ tmp/
 *.json
 *_report.json
 *_sales_report.json
+*.apk
 
 # Секреты / токены / приватное
 config.yaml
