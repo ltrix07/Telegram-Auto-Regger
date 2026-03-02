@@ -456,6 +456,7 @@ def maybe_handle_email_step(device: DeviceController, email_api: Optional[EmailA
         "e-mail",
         "mail",
         "почт",
+        "address" # Добавил на всякий случай
     )
     email_resource_markers = (
         "email_field",
@@ -463,13 +464,24 @@ def maybe_handle_email_step(device: DeviceController, email_api: Optional[EmailA
         ":id/email",
     )
 
-    email_step_detected = device._screen_contains_candidates(email_screen_patterns)
-    if not email_step_detected:
-        try:
-            ui_xml = device._dump_ui_xml().lower()
-            email_step_detected = any(marker in ui_xml for marker in email_resource_markers)
-        except Exception:
-            LOGGER.debug("Email step pre-check XML dump failed", exc_info=True)
+    LOGGER.info("Checking if email step is required (waiting for screen to render)...")
+    email_step_detected = False
+    
+    # Делаем 5 попыток с паузой в 3 секунды, чтобы дождаться загрузки экрана Telegram
+    for attempt in range(5):
+        email_step_detected = device._screen_contains_candidates(email_screen_patterns)
+        
+        if not email_step_detected:
+            try:
+                ui_xml = device._dump_ui_xml().lower()
+                email_step_detected = any(marker in ui_xml for marker in email_resource_markers)
+            except Exception:
+                LOGGER.debug("Email step pre-check XML dump failed", exc_info=True)
+                
+        if email_step_detected:
+            break # Экран найден, выходим из цикла ожидания
+            
+        time.sleep(3) # Ждем 3 секунды перед следующей попыткой
 
     if not email_step_detected:
         LOGGER.info("Email step is not required by Telegram, skipping...")
