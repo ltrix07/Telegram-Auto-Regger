@@ -3,17 +3,13 @@ services:
     image: redroid/redroid:11.0.0-latest
     container_name: android_1
     privileged: true
-    # Пробрасываем порт ADB на localhost сервера
     ports:
       - "5555:5555"
     command:
       - androidboot.redroid_width=720
       - androidboot.redroid_height=1280
       - androidboot.redroid_fps=30
+      # Оставляем только безопасную косметику для Telegram:
       - ro.product.model=Pixel 5
       - ro.product.manufacturer=Google
       - ro.product.brand=google
-      - ro.product.name=redfin
-      - ro.product.device=redfin
-      - ro.build.id=RQ3A.211001.001
-      - ro.build.version.release=11
