@@ -172,6 +172,15 @@ class DeviceController:
         "\u044d\u0442\u043e\u0442 \u043d\u043e\u043c\u0435\u0440 \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d",
         "\u043d\u043e\u043c\u0435\u0440 \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d",
     )
+    EMAIL_BANNED_TEXT_CANDIDATES = (
+        "email address is banned",
+        "email is banned",
+        "invalid email",
+        "\u0430\u0434\u0440\u0435\u0441 \u044d\u043b\u0435\u043a\u0442\u0440\u043e\u043d\u043d\u043e\u0439 \u043f\u043e\u0447\u0442\u044b \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d",
+        "\u044d\u043b\u0435\u043a\u0442\u0440\u043e\u043d\u043d\u0430\u044f \u043f\u043e\u0447\u0442\u0430 \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u0430",
+        "\u043f\u043e\u0447\u0442\u0430 \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u0430",
+        "\u043d\u0435\u0432\u0435\u0440\u043d\u044b\u0439 \u0430\u0434\u0440\u0435\u0441",
+    )
     TOO_MANY_ATTEMPTS_TEXT_CANDIDATES = (
         "too many attempts",
         "try again later",
@@ -1091,7 +1100,7 @@ class DeviceController:
             self._safe_tap_by_text_candidates(self.NEXT_DONE_TEXT_CANDIDATES, reason="submit phone number")
             self._adb("shell", "input", "keyevent", "66", check=False)
             self.invalidate_ui_dump_cache()
-        time.sleep(0.8)
+        time.sleep(0.3)
 
         self._safe_tap_by_text_candidates(self.YES_TEXT_CANDIDATES, reason="confirm phone number")
         self._handle_post_action_popups(rounds=4, include_accept=False)
@@ -1111,12 +1120,12 @@ class DeviceController:
         self._input_text(str(code))
         self._adb("shell", "input", "keyevent", "66", check=False)
         self.invalidate_ui_dump_cache()
-        time.sleep(1.0)
+        time.sleep(0.4)
 
+        self._raise_for_auth_blockers(step_name="code confirmation", include_existing_account=False)
         self._handle_post_action_popups(rounds=2, include_accept=False)
         self._handle_two_factor_reset_flow()
         self._handle_post_action_popups(rounds=3, include_accept=False)
-        self._raise_for_auth_blockers(step_name="code confirmation", include_existing_account=False)
 
     def input_email(self, email: str) -> None:
         """
@@ -1139,10 +1148,10 @@ class DeviceController:
         ):
             self._safe_tap_by_text_candidates(self.NEXT_DONE_TEXT_CANDIDATES, reason="submit email")
             self._adb("shell", "input", "keyevent", "66", check=False)
-        time.sleep(0.8)
+        time.sleep(0.3)
 
-        self._handle_post_action_popups(rounds=2, include_accept=False)
         self._raise_for_auth_blockers(step_name="email submission", include_existing_account=False)
+        self._handle_post_action_popups(rounds=2, include_accept=False)
 
     def fill_profile(self, first_name: str, last_name: str) -> None:
         """
@@ -1168,7 +1177,7 @@ class DeviceController:
             reason="submit profile name",
         ):
             self._safe_tap_by_text_candidates(self.PROFILE_FINISH_TEXT_CANDIDATES, reason="submit profile name")
-        time.sleep(0.8)
+        time.sleep(0.3)
 
         self._handle_post_action_popups(rounds=2, include_accept=True)
         self._safe_tap_by_text_candidates(self.ACCEPT_TEXT_CANDIDATES, reason="accept terms popup")
@@ -1185,7 +1194,7 @@ class DeviceController:
         if tapped:
             if reason:
                 LOGGER.debug("Tapped `%s` by text candidates", reason)
-            time.sleep(0.2)
+            time.sleep(0.1)
         return tapped
 
     def _safe_tap_telegram_resources(self, resource_names: Iterable[str], reason: str = "") -> bool:
@@ -1194,7 +1203,7 @@ class DeviceController:
         if tapped:
             if reason:
                 LOGGER.debug("Tapped `%s` by Telegram resource-id candidates", reason)
-            time.sleep(0.2)
+            time.sleep(0.1)
         return tapped
 
     def _tap_system_allow_button(self) -> bool:
@@ -1245,7 +1254,7 @@ class DeviceController:
                 break
                 
             # Если что-то нажали — ждем анимацию перед следующим дампом
-            time.sleep(1.0)
+            time.sleep(0.4)
 
     def _screen_contains_candidates(self, candidates: Iterable[str]) -> bool:
         self.invalidate_ui_dump_cache()
@@ -1267,6 +1276,10 @@ class DeviceController:
         if self._screen_contains_candidates(self.NUMBER_BANNED_TEXT_CANDIDATES):
             self._safe_tap_by_text_candidates(self.OK_TEXT_CANDIDATES, reason="banned number dialog")
             raise RuntimeError(f"Telegram rejected number on `{step_name}`: phone number is banned.")
+
+        if self._screen_contains_candidates(self.EMAIL_BANNED_TEXT_CANDIDATES):
+            self._safe_tap_by_text_candidates(self.OK_TEXT_CANDIDATES, reason="banned email dialog")
+            raise RuntimeError(f"Telegram rejected email on `{step_name}`: email is banned.")
 
         if self._screen_contains_candidates(self.TOO_MANY_ATTEMPTS_TEXT_CANDIDATES):
             raise RuntimeError(f"Telegram blocked retries on `{step_name}`: too many attempts.")
@@ -1584,7 +1597,7 @@ class DeviceController:
         for char in text:
             safe_char = self._escape_adb_text(char)
             self._adb("shell", "input", "text", safe_char)
-            time.sleep(random.uniform(0.05, 0.25))
+            time.sleep(random.uniform(0.01, 0.05))
         self.invalidate_ui_dump_cache()
 
     @staticmethod
