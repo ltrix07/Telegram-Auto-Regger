@@ -1,7 +1,6 @@
 ﻿from __future__ import annotations
 
 import logging
-import random
 import re
 import shlex
 import subprocess
@@ -171,6 +170,10 @@ class DeviceController:
         "phone number is banned",
         "\u044d\u0442\u043e\u0442 \u043d\u043e\u043c\u0435\u0440 \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d",
         "\u043d\u043e\u043c\u0435\u0440 \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d",
+    )
+    ALREADY_REGISTERED_TEXT_CANDIDATES = (
+        "check your telegram messages",
+        "\u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f telegram",
     )
     EMAIL_BANNED_TEXT_CANDIDATES = (
         "email address is banned",
@@ -1083,7 +1086,6 @@ class DeviceController:
                 reason="country code field",
             ):
                 self._input_text(cc_digits)
-                time.sleep(0.3)
 
         phone_digits = re.sub(r"\D", "", phone_number)
         if self._safe_tap_telegram_resources(self.PHONE_NUMBER_RESOURCE_ID_SUFFIXES, reason="phone number field"):
@@ -1100,11 +1102,12 @@ class DeviceController:
             self._safe_tap_by_text_candidates(self.NEXT_DONE_TEXT_CANDIDATES, reason="submit phone number")
             self._adb("shell", "input", "keyevent", "66", check=False)
             self.invalidate_ui_dump_cache()
-        time.sleep(0.3)
 
-        self._safe_tap_by_text_candidates(self.YES_TEXT_CANDIDATES, reason="confirm phone number")
-        self._handle_post_action_popups(rounds=4, include_accept=False)
+        self._safe_tap_by_text_candidates(["yes", "да"], reason="confirm phone number")
+        time.sleep(0.5)
+        self.invalidate_ui_dump_cache()
         self._raise_for_auth_blockers(step_name="phone submission", include_existing_account=True)
+        self._handle_post_action_popups(rounds=2, include_accept=False)
 
     def input_code(self, code: str) -> None:
         """
@@ -1120,7 +1123,6 @@ class DeviceController:
         self._input_text(str(code))
         self._adb("shell", "input", "keyevent", "66", check=False)
         self.invalidate_ui_dump_cache()
-        time.sleep(0.4)
 
         self._raise_for_auth_blockers(step_name="code confirmation", include_existing_account=False)
         self._handle_post_action_popups(rounds=2, include_accept=False)
@@ -1148,7 +1150,6 @@ class DeviceController:
         ):
             self._safe_tap_by_text_candidates(self.NEXT_DONE_TEXT_CANDIDATES, reason="submit email")
             self._adb("shell", "input", "keyevent", "66", check=False)
-        time.sleep(0.3)
 
         self._raise_for_auth_blockers(step_name="email submission", include_existing_account=False)
         self._handle_post_action_popups(rounds=2, include_accept=False)
@@ -1177,13 +1178,11 @@ class DeviceController:
             reason="submit profile name",
         ):
             self._safe_tap_by_text_candidates(self.PROFILE_FINISH_TEXT_CANDIDATES, reason="submit profile name")
-        time.sleep(0.3)
 
         self._handle_post_action_popups(rounds=2, include_accept=True)
         self._safe_tap_by_text_candidates(self.ACCEPT_TEXT_CANDIDATES, reason="accept terms popup")
         self._safe_tap_by_text_candidates(self.CONTINUE_TEXT_CANDIDATES, reason="continue after profile")
         self._tap_system_allow_button()
-        time.sleep(0.3)
         self._tap_system_allow_button()
         self._handle_post_action_popups(rounds=2, include_accept=False)
         self._raise_for_auth_blockers(step_name="profile setup", include_existing_account=False)
@@ -1194,7 +1193,6 @@ class DeviceController:
         if tapped:
             if reason:
                 LOGGER.debug("Tapped `%s` by text candidates", reason)
-            time.sleep(0.1)
         return tapped
 
     def _safe_tap_telegram_resources(self, resource_names: Iterable[str], reason: str = "") -> bool:
@@ -1203,7 +1201,6 @@ class DeviceController:
         if tapped:
             if reason:
                 LOGGER.debug("Tapped `%s` by Telegram resource-id candidates", reason)
-            time.sleep(0.1)
         return tapped
 
     def _tap_system_allow_button(self) -> bool:
@@ -1254,7 +1251,7 @@ class DeviceController:
                 break
                 
             # Если что-то нажали — ждем анимацию перед следующим дампом
-            time.sleep(0.4)
+            time.sleep(0.05)
 
     def _screen_contains_candidates(self, candidates: Iterable[str]) -> bool:
         self.invalidate_ui_dump_cache()
@@ -1276,6 +1273,9 @@ class DeviceController:
         if self._screen_contains_candidates(self.NUMBER_BANNED_TEXT_CANDIDATES):
             self._safe_tap_by_text_candidates(self.OK_TEXT_CANDIDATES, reason="banned number dialog")
             raise RuntimeError(f"Telegram rejected number on `{step_name}`: phone number is banned.")
+
+        if self._screen_contains_candidates(self.ALREADY_REGISTERED_TEXT_CANDIDATES):
+            raise RuntimeError(f"Telegram sent code to another app on `{step_name}`: number is already registered.")
 
         if self._screen_contains_candidates(self.EMAIL_BANNED_TEXT_CANDIDATES):
             self._safe_tap_by_text_candidates(self.OK_TEXT_CANDIDATES, reason="banned email dialog")
@@ -1594,10 +1594,11 @@ class DeviceController:
         text = str(value)
         if not text:
             return
-        for char in text:
-            safe_char = self._escape_adb_text(char)
-            self._adb("shell", "input", "text", safe_char)
-            time.sleep(random.uniform(0.01, 0.05))
+        chunk_size = 3
+        for i in range(0, len(text), chunk_size):
+            chunk = text[i : i + chunk_size]
+            safe_chunk = self._escape_adb_text(chunk)
+            self._adb("shell", "input", "text", safe_chunk)
         self.invalidate_ui_dump_cache()
 
     @staticmethod
