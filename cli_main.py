@@ -509,7 +509,6 @@ def maybe_handle_email_step(device: DeviceController, email_api: Optional[EmailA
         
         # --- ДОБАВЬ ЭТОТ БЛОК ДЛЯ ДЕБАГА ---
         try:
-            import time
             stamp = int(time.time())
             device.take_screenshot(f"/app/debug_email_skip_{stamp}.png")
             with open(f"/app/debug_email_skip_{stamp}.xml", "w", encoding="utf-8") as f:
