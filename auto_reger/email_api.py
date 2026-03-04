@@ -159,7 +159,9 @@ class EmailApi:
 
     def _resolve_imap_server(self, email_address: str) -> str:
         domain = email_address.split("@", 1)[1].lower()
-        host = self._IMAP_SERVER_BY_DOMAIN.get(domain) or f"imap.{domain}"
+        # Если домен есть в словаре (mail.ru, gmail, outlook) — берем его.
+        # Если нет — по умолчанию считаем, что это кастомный домен от Firstmail.
+        host = self._IMAP_SERVER_BY_DOMAIN.get(domain) or "imap.firstmail.ltd"
         LOGGER.info("Resolved IMAP host for %s: %s", domain, host)
         return host
 
