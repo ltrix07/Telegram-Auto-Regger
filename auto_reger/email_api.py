@@ -68,45 +68,65 @@ class EmailApi:
 
     def get_email(self, site: str = "telegram.org", mail_type: str = "OUTLOOK") -> Tuple[str, str]:
         """
-        Allocate the first `login:pass` entry from local file and remove it.
-
-        Arguments are kept for backward compatibility and ignored.
-
-        :return: Tuple `(email_address, password)`.
+        Allocate the first working `login:pass` entry from local file.
+        Validates IMAP connection before returning. Invalid emails are discarded.
         """
         _ = site
         _ = mail_type
-        with self._EMAIL_FILE_LOCK:
-            if not self.emails_file.exists():
-                LOGGER.error("Emails file not found: %s", self.emails_file)
-                raise NoEmailsLeftError(f"Emails file not found: {self.emails_file}")
+        while True:
+            email_address = None
+            password = None
 
-            raw_lines = self.emails_file.read_text(encoding="utf-8").splitlines()
-            if not raw_lines:
-                LOGGER.error("Emails file is empty: %s", self.emails_file)
-                raise NoEmailsLeftError(f"Emails file is empty: {self.emails_file}")
+            # 1. Take one email from file (thread-safe).
+            with self._EMAIL_FILE_LOCK:
+                if not self.emails_file.exists():
+                    LOGGER.error("Emails file not found: %s", self.emails_file)
+                    raise NoEmailsLeftError(f"Emails file not found: {self.emails_file}")
 
-            remaining_lines = list(raw_lines)
-            while remaining_lines:
-                line = remaining_lines.pop(0).strip()
-                if not line:
-                    continue
-                email_address, password = self._parse_login_password(line)
-                if not email_address or not password:
-                    LOGGER.error("Invalid email row in %s: %r", self.emails_file, line)
-                    continue
+                raw_lines = self.emails_file.read_text(encoding="utf-8").splitlines()
+                if not raw_lines:
+                    LOGGER.error("Emails file is empty: %s", self.emails_file)
+                    raise NoEmailsLeftError(f"Emails file is empty: {self.emails_file}")
+
+                remaining_lines = list(raw_lines)
+                while remaining_lines:
+                    line = remaining_lines.pop(0).strip()
+                    if not line:
+                        continue
+                    e, p = self._parse_login_password(line)
+                    if e and p:
+                        email_address = e
+                        password = p
+                        break
 
                 self._write_back_lines(remaining_lines)
-                LOGGER.info(
-                    "Allocated local email: %s (remaining rows: %s)",
-                    email_address,
-                    sum(1 for row in remaining_lines if row.strip()),
-                )
-                return email_address, password
 
-            self._write_back_lines(remaining_lines)
-            LOGGER.error("No valid email credentials found in %s", self.emails_file)
-            raise NoEmailsLeftError(f"No valid email credentials found in {self.emails_file}")
+            # 2. File has no parseable credentials left.
+            if not email_address or not password:
+                LOGGER.error("No valid email credentials found in %s", self.emails_file)
+                raise NoEmailsLeftError(f"No valid email credentials found in {self.emails_file}")
+
+            # 3. IMAP pre-check outside lock, so other threads are not blocked.
+            try:
+                LOGGER.info("Pre-checking IMAP access for %s...", email_address)
+                client = self._connect_imap(email_address, password)
+                self._safe_logout(client)
+                LOGGER.info("IMAP pre-check passed for %s. Allocating.", email_address)
+                return email_address, password
+            except EmailAuthorizationError as exc:
+                LOGGER.warning(
+                    "IMAP pre-check failed for %s, discarding and trying next. Error: %s",
+                    email_address,
+                    exc,
+                )
+                continue
+            except Exception as exc:
+                LOGGER.warning(
+                    "Unexpected error during IMAP pre-check for %s: %s. Discarding.",
+                    email_address,
+                    exc,
+                )
+                continue
 
     def wait_for_email_code(self, email_address: str, password: str, timeout: int = 120) -> str:
         """
@@ -337,14 +357,14 @@ class EmailApi:
 
     @staticmethod
     def _parse_login_password(line: str) -> Tuple[str, str]:
-        parts = [chunk.strip() for chunk in str(line).split(":")]
+        # Normalize common separators to colon for provider-agnostic parsing.
+        normalized_line = str(line).replace(";", ":").replace("|", ":").replace("\t", ":")
+        parts = [chunk.strip() for chunk in normalized_line.split(":")]
         if len(parts) < 2:
             return "", ""
         login = parts[0]
         password = parts[1]
-        if not login or not password:
-            return "", ""
-        if "@" not in login:
+        if not login or not password or "@" not in login:
             return "", ""
         return login, password
 
