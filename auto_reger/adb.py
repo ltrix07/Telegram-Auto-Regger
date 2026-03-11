@@ -186,6 +186,153 @@ def run_adb_shell_command(
     return (result.stdout or "").strip()
 
 
+def _best_effort_remount(udid: str | None = None, adb_path: str | None = None) -> None:
+    resolved_adb_path = adb_path or ADB_PATH
+    device_label = udid or "<default>"
+    remount_result = _adb_run(["remount"], udid=udid, adb_path=resolved_adb_path, timeout=20)
+    if remount_result.returncode == 0:
+        logging.info("ADB remount succeeded on %s", device_label)
+        return
+
+    logging.warning(
+        "ADB remount failed on %s: %s",
+        device_label,
+        (remount_result.stderr or remount_result.stdout or "").strip(),
+    )
+    fallback_result = _adb_run(
+        ["shell", "mount", "-o", "rw,remount", "/system"],
+        udid=udid,
+        adb_path=resolved_adb_path,
+        timeout=20,
+    )
+    if fallback_result.returncode != 0:
+        logging.warning(
+            "Fallback remount failed on %s: %s",
+            device_label,
+            (fallback_result.stderr or fallback_result.stdout or "").strip(),
+        )
+
+
+def _safe_mv(
+    source: str,
+    destination: str,
+    udid: str | None = None,
+    adb_path: str | None = None,
+    timeout: int = 20,
+) -> bool:
+    """
+    Best-effort move command that never raises if the file does not exist.
+    """
+    result = _adb_run(
+        [
+            "shell",
+            "sh",
+            "-c",
+            (
+                f"if [ -f {source} ] && [ ! -f {destination} ]; then "
+                f"mv {source} {destination}; echo moved; "
+                f"elif [ -f {destination} ] && [ ! -f {source} ]; then "
+                f"echo already; "
+                f"else echo not_found; fi"
+            ),
+        ],
+        udid=udid,
+        adb_path=adb_path,
+        timeout=timeout,
+    )
+    if result.returncode != 0:
+        logging.warning(
+            "ADB mv failed on %s: %s -> %s | %s",
+            udid or "<default>",
+            source,
+            destination,
+            (result.stderr or result.stdout or "").strip(),
+        )
+        return False
+
+    outcome = (result.stdout or "").strip().lower()
+    if outcome == "moved":
+        logging.info("ADB mv succeeded on %s: %s -> %s", udid or "<default>", source, destination)
+    elif outcome == "already":
+        logging.info("ADB mv skipped on %s (already in desired state): %s", udid or "<default>", destination)
+    else:
+        logging.info("ADB mv skipped on %s (not found): %s", udid or "<default>", source)
+    return True
+
+
+def hide_root(udid: str | None = None, adb_path: str | None = None) -> bool:
+    """
+    Hide su binaries by renaming them while keeping adbd root (ghost root).
+    """
+    resolved_adb_path = adb_path or ADB_PATH
+    device_label = udid or "<default>"
+
+    _adb_run(["root"], udid=udid, adb_path=resolved_adb_path, timeout=20)
+    time.sleep(0.8)
+
+    cache_key = udid or "__default__"
+    _ROOT_MODE_CACHE.pop(cache_key, None)
+    try:
+        root_mode = ensure_adb_root(udid=udid, adb_path=resolved_adb_path)
+    except Exception as exc:
+        logging.error("Failed to ensure adb root on %s: %s", device_label, exc)
+        return False
+
+    if root_mode != "adbd":
+        logging.warning(
+            "Skipping hide_root on %s: adbd root is required (current mode=%s)",
+            device_label,
+            root_mode,
+        )
+        return False
+
+    _best_effort_remount(udid=udid, adb_path=resolved_adb_path)
+
+    ok_bin = _safe_mv(
+        "/system/bin/su",
+        "/system/bin/su_hidden",
+        udid=udid,
+        adb_path=resolved_adb_path,
+    )
+    ok_xbin = _safe_mv(
+        "/system/xbin/su",
+        "/system/xbin/su_hidden",
+        udid=udid,
+        adb_path=resolved_adb_path,
+    )
+    return ok_bin or ok_xbin
+
+
+def restore_root(udid: str | None = None, adb_path: str | None = None) -> bool:
+    """
+    Restore su binaries back to their original paths.
+    """
+    resolved_adb_path = adb_path or ADB_PATH
+    device_label = udid or "<default>"
+
+    try:
+        ensure_adb_root(udid=udid, adb_path=resolved_adb_path)
+    except Exception as exc:
+        logging.error("Failed to ensure adb root on %s: %s", device_label, exc)
+        return False
+
+    _best_effort_remount(udid=udid, adb_path=resolved_adb_path)
+
+    ok_bin = _safe_mv(
+        "/system/bin/su_hidden",
+        "/system/bin/su",
+        udid=udid,
+        adb_path=resolved_adb_path,
+    )
+    ok_xbin = _safe_mv(
+        "/system/xbin/su_hidden",
+        "/system/xbin/su",
+        udid=udid,
+        adb_path=resolved_adb_path,
+    )
+    return ok_bin or ok_xbin
+
+
 def _parse_telegram_version_from_dumpsys(dumpsys_output: str) -> str:
     for line in dumpsys_output.splitlines():
         if "versionName=" not in line:

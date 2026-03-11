@@ -9,7 +9,21 @@ services:
       - androidboot.redroid_width=720
       - androidboot.redroid_height=1280
       - androidboot.redroid_fps=30
-      # Оставляем только безопасную косметику для Telegram:
+    environment:
       - ro.product.model=Pixel 5
       - ro.product.manufacturer=Google
       - ro.product.brand=google
+      - ro.product.name=redfin
+      - ro.product.device=redfin
+      - ro.product.board=redfin
+      - ro.build.flavor=redfin-user
+      - ro.build.type=user
+      - ro.build.tags=release-keys
+      - ro.build.fingerprint=google/redfin/redfin:11/RQ3A.210805.001.A1/7474174:user/release-keys
+      - ro.build.description=redfin-user 11 RQ3A.210805.001.A1 7474174 release-keys
+      - ro.kernel.qemu=0
+      - ro.hardware.egl=adreno
+      - ro.hardware.vulkan=adreno
+      # Отключаем встроенный root (su), чтобы Telegram его не спалил
+      - redroid.prop.ro.secure=1
+      - redroid.prop.ro.debuggable=0

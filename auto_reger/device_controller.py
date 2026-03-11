@@ -414,6 +414,109 @@ class DeviceController:
 
         return self._run_adb(*args, check=check, timeout=timeout)
 
+    def _best_effort_remount(self) -> None:
+        remount_result = self._run_adb("remount", check=False, timeout=20)
+        if remount_result.returncode == 0:
+            LOGGER.info("ADB remount succeeded on %s", self.device_id)
+            return
+
+        LOGGER.warning(
+            "ADB remount failed on %s: %s",
+            self.device_id,
+            (remount_result.stderr or remount_result.stdout or "").strip(),
+        )
+        fallback_result = self._adb(
+            "shell",
+            "mount",
+            "-o",
+            "rw,remount",
+            "/system",
+            check=False,
+            timeout=20,
+        )
+        if fallback_result.returncode != 0:
+            LOGGER.warning(
+                "Fallback remount failed on %s: %s",
+                self.device_id,
+                (fallback_result.stderr or fallback_result.stdout or "").strip(),
+            )
+
+    def _safe_mv(self, source: str, destination: str) -> bool:
+        result = self._adb(
+            "shell",
+            "sh",
+            "-c",
+            (
+                f"if [ -f {source} ] && [ ! -f {destination} ]; then "
+                f"mv {source} {destination}; echo moved; "
+                f"elif [ -f {destination} ] && [ ! -f {source} ]; then "
+                f"echo already; "
+                f"else echo not_found; fi"
+            ),
+            check=False,
+            timeout=20,
+        )
+        if result.returncode != 0:
+            LOGGER.warning(
+                "ADB mv failed on %s: %s -> %s | %s",
+                self.device_id,
+                source,
+                destination,
+                (result.stderr or result.stdout or "").strip(),
+            )
+            return False
+
+        outcome = (result.stdout or "").strip().lower()
+        if outcome == "moved":
+            LOGGER.info("ADB mv succeeded on %s: %s -> %s", self.device_id, source, destination)
+        elif outcome == "already":
+            LOGGER.info("ADB mv skipped on %s (already in desired state): %s", self.device_id, destination)
+        else:
+            LOGGER.info("ADB mv skipped on %s (not found): %s", self.device_id, source)
+        return True
+
+    def hide_root(self) -> bool:
+        """
+        Hide su binaries by renaming them while keeping adbd root (ghost root).
+        """
+        try:
+            self._run_adb("root", check=False, timeout=20)
+            time.sleep(0.8)
+            self._root_checked = False
+            self._root_mode = None
+            self._ensure_root_access()
+        except Exception as exc:
+            LOGGER.error("Failed to ensure adb root on %s: %s", self.device_id, exc)
+            return False
+
+        if self._root_mode != "adbd":
+            LOGGER.warning(
+                "Skipping hide_root on %s: adbd root is required (current mode=%s)",
+                self.device_id,
+                self._root_mode,
+            )
+            return False
+
+        self._best_effort_remount()
+        ok_bin = self._safe_mv("/system/bin/su", "/system/bin/su_hidden")
+        ok_xbin = self._safe_mv("/system/xbin/su", "/system/xbin/su_hidden")
+        return ok_bin or ok_xbin
+
+    def restore_root(self) -> bool:
+        """
+        Restore su binaries back to their original paths.
+        """
+        try:
+            self._ensure_root_access()
+        except Exception as exc:
+            LOGGER.error("Failed to ensure adb root on %s: %s", self.device_id, exc)
+            return False
+
+        self._best_effort_remount()
+        ok_bin = self._safe_mv("/system/bin/su_hidden", "/system/bin/su")
+        ok_xbin = self._safe_mv("/system/xbin/su_hidden", "/system/xbin/su")
+        return ok_bin or ok_xbin
+
     def connect(self) -> None:
         """
         Connect to network ADB device if ``device_id`` is in ``host:port`` format.
