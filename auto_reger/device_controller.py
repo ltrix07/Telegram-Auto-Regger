@@ -442,20 +442,18 @@ class DeviceController:
             )
 
     def _safe_mv(self, source: str, destination: str) -> bool:
+        # Упрощенная команда без if/then/elif, чтобы избежать синтаксических ошибок в Android sh
+        cmd = f"test -f {source} && mv {source} {destination} && echo moved || echo skipped"
+
         result = self._adb(
             "shell",
             "sh",
             "-c",
-            (
-                f"if [ -f {source} ] && [ ! -f {destination} ]; then "
-                f"mv {source} {destination}; echo moved; "
-                f"elif [ -f {destination} ] && [ ! -f {source} ]; then "
-                f"echo already; "
-                f"else echo not_found; fi"
-            ),
+            cmd,
             check=False,
             timeout=20,
         )
+
         if result.returncode != 0:
             LOGGER.warning(
                 "ADB mv failed on %s: %s -> %s | %s",
@@ -469,10 +467,8 @@ class DeviceController:
         outcome = (result.stdout or "").strip().lower()
         if outcome == "moved":
             LOGGER.info("ADB mv succeeded on %s: %s -> %s", self.device_id, source, destination)
-        elif outcome == "already":
-            LOGGER.info("ADB mv skipped on %s (already in desired state): %s", self.device_id, destination)
         else:
-            LOGGER.info("ADB mv skipped on %s (not found): %s", self.device_id, source)
+            LOGGER.info("ADB mv skipped on %s (already moved or not found)", self.device_id)
         return True
 
     def hide_root(self) -> bool:
