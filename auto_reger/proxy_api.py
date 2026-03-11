@@ -16,7 +16,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ProxyApi:
-    """Proxy-Seller Personal API client for resident proxies."""
+    """Proxy API client for resident/mobile proxies."""
 
     def __init__(
         self,
@@ -27,18 +27,41 @@ class ProxyApi:
         request_timeout: int | None = None,
     ) -> None:
         cfg = CONFIG.get("proxy_api", {})
+        if not isinstance(cfg, dict):
+            cfg = {}
 
-        self.api_key = str(api_key or cfg.get("key", "")).strip()
+        raw_provider = str(cfg.get("active_provider", "")).strip()
+        self.active_provider = self._normalize_provider(raw_provider) if raw_provider else "proxyseller"
+        self.proxy_type = str(cfg.get("proxy_type", "")).strip()
+
+        proxyseller_cfg = cfg.get("proxyseller", {})
+        if not isinstance(proxyseller_cfg, dict):
+            proxyseller_cfg = {}
+
+        def _read_proxyseller_value(key: str, default: str = "") -> str:
+            if key in proxyseller_cfg:
+                return str(proxyseller_cfg.get(key, default))
+            return str(cfg.get(key, default))
+
+        self.api_key = str(api_key or _read_proxyseller_value("key", "")).strip()
         # Personal API root: https://proxy-seller.com/personal/api/v1/{key}
         self.base_url = f"https://proxy-seller.com/personal/api/v1/{self.api_key}" if self.api_key else ""
-        self.api_url = str(api_url or cfg.get("url", "")).strip()
-        self.rotate_url = str(rotate_url or cfg.get("rotate_url", "")).strip()
-        self.method = str(method or cfg.get("method", "GET")).upper().strip() or "GET"
+        self.api_url = str(api_url or _read_proxyseller_value("url", "")).strip()
+        self.rotate_url = str(rotate_url or _read_proxyseller_value("rotate_url", "")).strip()
+        self.method = str(method or _read_proxyseller_value("method", "GET")).upper().strip() or "GET"
 
-        timeout_value = request_timeout if request_timeout is not None else cfg.get(
-            "timeout_seconds",
-            20,
-        )
+        decodo_cfg = cfg.get("decodo", {})
+        if not isinstance(decodo_cfg, dict):
+            decodo_cfg = {}
+        self.decodo_username = str(decodo_cfg.get("username", "")).strip()
+        self.decodo_password = str(decodo_cfg.get("password", "")).strip()
+        self.decodo_host = str(decodo_cfg.get("host", "")).strip()
+        self.decodo_port = decodo_cfg.get("port", "")
+        self.decodo_session_template = str(
+            decodo_cfg.get("session_template", "{username}-session-{session_id}")
+        ).strip() or "{username}-session-{session_id}"
+
+        timeout_value = request_timeout if request_timeout is not None else cfg.get("timeout_seconds", 20)
         try:
             self.request_timeout = int(timeout_value)
         except (TypeError, ValueError):
@@ -53,6 +76,16 @@ class ProxyApi:
         self._geo_path = Path(__file__).resolve().parents[1] / "geo.json"
         self._geo_countries_cache: list[dict[str, Any]] | None = None
         self._geo_warning_shown = False
+
+    @staticmethod
+    def _normalize_provider(value: str) -> str:
+        normalized = str(value or "").strip().lower()
+        mapping = {
+            "proxy-seller": "proxyseller",
+            "proxy_seller": "proxyseller",
+            "proxy seller": "proxyseller",
+        }
+        return mapping.get(normalized, normalized)
 
     @staticmethod
     def _normalize_country_token(value: str) -> str:
@@ -154,6 +187,12 @@ class ProxyApi:
 
     def _ensure_proxies_loaded(self, country: str) -> None:
         """Load or create resident list by country and generate backconnect proxy ports."""
+        if self.active_provider == "decodo":
+            self._load_decodo_proxies(country)
+            return
+        if self.active_provider != "proxyseller":
+            raise RuntimeError(f"Unsupported proxy_api.active_provider value: {self.active_provider!r}")
+
         if not self.api_key:
             raise RuntimeError("proxy_api.key is empty in config.yaml.")
         if not self.base_url:
@@ -229,6 +268,55 @@ class ProxyApi:
             host,
             resolved_code,
             list_id or "unknown",
+        )
+
+    def _load_decodo_proxies(self, country: str) -> None:
+        resolved_code = self._normalize_country_token(country)
+        if not resolved_code:
+            raise RuntimeError(f"Invalid country code for decodo proxy list: {country!r}")
+
+        if not self.decodo_username:
+            raise RuntimeError("proxy_api.decodo.username is empty in config.yaml.")
+        if not self.decodo_password:
+            raise RuntimeError("proxy_api.decodo.password is empty in config.yaml.")
+        if not self.decodo_host:
+            raise RuntimeError("proxy_api.decodo.host is empty in config.yaml.")
+
+        try:
+            port_value = int(self.decodo_port)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("proxy_api.decodo.port must be an integer.") from exc
+        if port_value <= 0 or port_value > 65535:
+            raise RuntimeError("proxy_api.decodo.port must be between 1 and 65535.")
+
+        session_template = self.decodo_session_template or "{username}-session-{session_id}"
+        self.proxies_cache = []
+        for i in range(1000):
+            try:
+                session_user = session_template.format(username=self.decodo_username, session_id=i)
+            except (KeyError, ValueError) as exc:
+                raise RuntimeError(
+                    "proxy_api.decodo.session_template must use {username} and {session_id} placeholders."
+                ) from exc
+            self.proxies_cache.append(
+                {
+                    "ip": self.decodo_host,
+                    "port": str(port_value),
+                    "user": session_user,
+                    "pass": self.decodo_password,
+                    "type": "socks5",
+                }
+            )
+
+        self.current_index = 0
+        self.last_reset_time = time.time()
+        self._loaded_country = resolved_code
+        LOGGER.info(
+            "Generated %s decodo mobile proxies for host=%s port=%s (country=%s).",
+            len(self.proxies_cache),
+            self.decodo_host,
+            port_value,
+            resolved_code,
         )
 
     def _create_list(self, country: str) -> dict[str, Any]:
@@ -522,8 +610,11 @@ class ProxyApi:
             LOGGER.error("registration.default_country is empty. Cannot load proxies.")
             return []
 
-        if not self.api_key:
+        if self.active_provider == "proxyseller" and not self.api_key:
             LOGGER.error("proxy_api.key is empty in config.yaml. Cannot request proxies.")
+            return []
+        if self.active_provider not in {"proxyseller", "decodo"}:
+            LOGGER.error("Unsupported proxy_api.active_provider value: %s", self.active_provider)
             return []
 
         try:
