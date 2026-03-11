@@ -871,6 +871,7 @@ def run_single_cycle(
         record_proc = device.start_recording(remote_video_path)
         if not device.is_ready():
             raise RuntimeError(f"Device {device_id} is not ready for registration.")
+        device.hide_root()
 
         country = str(CONFIG.get("registration", {}).get("default_country", "US")).strip() or "US"
         proxy_data = proxy_api.get_proxy(country_code=country)
@@ -954,6 +955,7 @@ def run_single_cycle(
         device.input_code(sms_code)
         maybe_fill_profile_step(device=device, last_names=last_names)
 
+        device.restore_root()
         session_path = session_generator.generate_session(
             phone_number=phone_number,
             device_controller=device,
