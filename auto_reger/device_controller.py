@@ -1022,10 +1022,14 @@ class DeviceController:
 
     def launch_telegram(self) -> None:
         """
-        Launch official Telegram or Telegram X app via generic monkey command.
+        Launch official Telegram or fork app via generic monkey command
+        and dynamically wait for the UI to fully render.
         """
         LOGGER.info("Launching Telegram on %s", self.device_id)
-        # Используем monkey для универсального запуска любого пакета без привязки к конкретному Activity
+        # Очищаем кеш UI перед запуском
+        self.invalidate_ui_dump_cache()
+
+        # Запускаем через monkey
         self._adb(
             "shell",
             "monkey",
@@ -1036,7 +1040,25 @@ class DeviceController:
             "1",
             check=False,
         )
-        time.sleep(2.0)
+
+        LOGGER.info("Waiting for app interface to load...")
+        deadline = time.time() + 15.0
+        app_loaded = False
+
+        # Динамическое ожидание появления стартового экрана или экрана ввода номера
+        while time.time() < deadline:
+            if self._screen_contains_candidates(self.START_MESSAGING_TEXT_CANDIDATES) or \
+               self._screen_contains_candidates(self.CONTINUE_TEXT_CANDIDATES) or \
+               self._screen_contains_candidates(self.PHONE_NUMBER_RESOURCE_ID_SUFFIXES):
+                app_loaded = True
+                break
+            time.sleep(1.0)
+
+        if not app_loaded:
+            LOGGER.warning("App load timeout: Telegram UI might still be loading or stuck.")
+        else:
+            LOGGER.info("Telegram interface successfully loaded.")
+
         if self._tap_by_text_candidates(self.START_MESSAGING_TEXT_CANDIDATES):
             time.sleep(0.5)
 
