@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import logging
+import signal
 import re
 import shlex
 import subprocess
@@ -732,13 +733,19 @@ class DeviceController:
         return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def stop_recording_and_pull(self, proc: subprocess.Popen, remote_path: str, local_path: str) -> bool:
-        self._adb("shell", "kill -2 $(pidof screenrecord)", check=False, timeout=5)
         try:
-            proc.wait(timeout=5)
+            proc.send_signal(signal.SIGINT)
+        except Exception:
+            pass
+
+        self._adb("shell", "pkill", "-INT", "screenrecord", check=False, timeout=5)
+        self._adb("shell", "killall", "-2", "screenrecord", check=False, timeout=5)
+        try:
+            proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             proc.kill()
 
-        time.sleep(1.5)
+        time.sleep(2.0)
         self._adb("pull", remote_path, local_path, check=False, timeout=30)
         self._adb("shell", "rm", "-f", remote_path, check=False, timeout=5)
 
