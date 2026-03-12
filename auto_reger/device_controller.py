@@ -1014,19 +1014,18 @@ class DeviceController:
 
     def launch_telegram(self) -> None:
         """
-        Launch official Telegram app via launcher intent.
+        Launch official Telegram or Telegram X app via generic monkey command.
         """
         LOGGER.info("Launching Telegram on %s", self.device_id)
+        # Используем monkey для универсального запуска любого пакета без привязки к конкретному Activity
         self._adb(
             "shell",
-            "am",
-            "start",
-            "-a",
-            "android.intent.action.MAIN",
+            "monkey",
+            "-p",
+            self.telegram_package,
             "-c",
             "android.intent.category.LAUNCHER",
-            "-n",
-            f"{self.telegram_package}/org.telegram.messenger.ui.LaunchActivity",
+            "1",
             check=False,
         )
         time.sleep(2.0)
@@ -1528,10 +1527,12 @@ class DeviceController:
             timeout=15,
         )
         packages_out = result.stdout or ""
+        # Добавлен Telegram X (challegram)
         candidates = [
             "org.telegram.messenger.web",
             "org.telegram.messenger",
             "org.telegram.messenger.beta",
+            "org.thunderdog.challegram",
         ]
 
         for package_name in candidates:
@@ -1540,9 +1541,13 @@ class DeviceController:
                 LOGGER.info("Successfully detected Telegram package: %s", package_name)
                 return True
 
-        telegram_lines = [line for line in packages_out.splitlines() if "telegram" in line.lower()]
+        telegram_lines = [
+            line
+            for line in packages_out.splitlines()
+            if "telegram" in line.lower() or "thunderdog" in line.lower()
+        ]
         LOGGER.error(
-            "Could not find exact Telegram package. Lines containing 'telegram': %s",
+            "Could not find exact Telegram package. Lines containing 'telegram/thunderdog': %s",
             telegram_lines,
         )
         return False
