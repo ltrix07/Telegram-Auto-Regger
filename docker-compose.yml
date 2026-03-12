@@ -10,20 +10,27 @@ services:
       - androidboot.redroid_height=1280
       - androidboot.redroid_fps=30
     environment:
-      - ro.product.model=Pixel 5
-      - ro.product.manufacturer=Google
-      - ro.product.brand=google
-      - ro.product.name=redfin
-      - ro.product.device=redfin
-      - ro.product.board=redfin
-      - ro.build.flavor=redfin-user
+      # --- Уникальный отпечаток (Samsung Galaxy S21 / Android 11) ---
+      - ro.product.model=SM-G991U
+      - ro.product.manufacturer=samsung
+      - ro.product.brand=samsung
+      - ro.product.name=o1qsqw
+      - ro.product.device=o1q
+      - ro.product.board=lahaina
+      - ro.build.flavor=o1qsqw-user
       - ro.build.type=user
       - ro.build.tags=release-keys
-      - ro.build.fingerprint=google/redfin/redfin:11/RQ3A.210805.001.A1/7474174:user/release-keys
-      - ro.build.description=redfin-user 11 RQ3A.210805.001.A1 7474174 release-keys
+      - ro.build.fingerprint=samsung/o1qsqw/o1q:11/RP1A.200720.012/G991USQU4AUF5:user/release-keys
+      - ro.build.description=o1qsqw-user 11 RP1A.200720.012 G991USQU4AUF5 release-keys
+      
+      # --- Настройки гео и таймзоны (под US прокси) ---
+      - ro.product.locale=en-US
+      - persist.sys.timezone=America/New_York
+      - TZ=America/New_York
+
+      # --- Базовые системные настройки ---
       - ro.kernel.qemu=0
       - ro.hardware.egl=adreno
       - ro.hardware.vulkan=adreno
-      # Отключаем встроенный root (su), чтобы Telegram его не спалил
       - redroid.prop.ro.secure=1
       - redroid.prop.ro.debuggable=0
