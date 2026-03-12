@@ -1466,7 +1466,17 @@ class DeviceController:
         This is used after Telethon triggers a login code message.
         """
         LOGGER.info("Opening Telegram system chat to read Telethon login code")
-        self.launch_telegram()
+        self._adb(
+            "shell",
+            "monkey",
+            "-p",
+            self.telegram_package,
+            "-c",
+            "android.intent.category.LAUNCHER",
+            "1",
+            check=False,
+        )
+        time.sleep(4)
 
         # Return to chats list.
         for _ in range(3):
@@ -1477,9 +1487,7 @@ class DeviceController:
             time.sleep(0.8)
             return
 
-        # TODO: calibrate coordinates for the topmost system chat on your devices.
-        self._tap_percent(0.5, 0.18)
-        time.sleep(0.8)
+        LOGGER.warning("Telegram system chat not found by title; relying on chat list preview for login code")
 
     def read_telegram_code_from_screen(self, timeout: int = 45, poll_interval: float = 2.0) -> str:
         """
@@ -1493,8 +1501,7 @@ class DeviceController:
         LOGGER.info("Reading Telegram login code from UI dump")
         deadline = time.time() + timeout
         patterns = (
-            re.compile(r"\b(\d{5})\b"),
-            re.compile(r"(?i)(?:code|\u043a\u043e\u0434)[^\d]{0,20}(\d{5,6})"),
+            re.compile(r"(?i)(?:web\s+login\s+code|login\s+code|login|code|\u043a\u043e\u0434)[^\d]{0,40}(\d{5,6})"),
         )
 
         while time.time() < deadline:
