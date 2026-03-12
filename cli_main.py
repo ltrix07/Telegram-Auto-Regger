@@ -55,6 +55,8 @@ ROUTINE_ALERT_SKIP_PATTERNS: tuple[str, ...] = (
     "telegram proxy popup was not confirmed",
     "proxy must be socks5",
     "internet connectivity check failed",
+    "number is already registered",
+    "already linked to telegram",
 )
 
 

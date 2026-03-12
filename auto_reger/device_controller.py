@@ -177,7 +177,12 @@ class DeviceController:
     )
     ALREADY_REGISTERED_TEXT_CANDIDATES = (
         "check your telegram messages",
+        "we've sent the code to the telegram app",
+        "we sent the code to the telegram app",
+        "sent the code to the telegram app",
+        "app on your other device",
         "\u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f telegram",
+        "\u043e\u0442\u043f\u0440\u0430\u0432\u0438\u043b\u0438 \u043a\u043e\u0434 \u0432 \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u0435 telegram",
     )
     EMAIL_BANNED_TEXT_CANDIDATES = (
         "email address is banned",
