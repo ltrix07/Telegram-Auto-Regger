@@ -430,11 +430,12 @@ def maybe_send_cycle_error_alert(
             alert_text = "Screenshot for the error above:"
             if screenshot_capture_failed and not resolved_screenshot_path:
                 alert_text += " [System]: Screenshot failed (Device Offline)"
-        LOGGER.warning(
-            "Cycle video alert delivery failed for cycle %s on %s. Falling back to screenshot alert.",
-            cycle_index,
-            device_id or "unknown",
-        )
+        else:
+            LOGGER.warning(
+                "Cycle video alert delivery failed for cycle %s on %s. Falling back to screenshot alert.",
+                cycle_index,
+                device_id or "unknown",
+            )
 
     with ALERT_SEND_LOCK:
         sent = notifier.send_error_alert(
