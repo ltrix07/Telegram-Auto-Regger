@@ -5,6 +5,10 @@ services:
     privileged: true
     ports:
       - "5555:5555"
+    volumes:
+      - /dev/binderfs/binder:/dev/binder
+      - /dev/binderfs/hwbinder:/dev/hwbinder
+      - /dev/binderfs/vndbinder:/dev/vndbinder
     command:
       - androidboot.redroid_width=720
       - androidboot.redroid_height=1280
