@@ -32,7 +32,10 @@ class DeviceController:
         "org.telegram.messenger.web",
         "org.telegram.messenger",
         "org.telegram.messenger.beta",
-        "org.thunderdog.challegram"
+        "org.thunderdog.challegram",
+        "tw.nekomimi.nekogram",
+        "org.telegram.messenger.foss",
+        "com.ayugram.app"
     )
     UI_DUMP_PATH = "/sdcard/window_dump.xml"
     PROXY_ENABLE_TEXT_CANDIDATES = (

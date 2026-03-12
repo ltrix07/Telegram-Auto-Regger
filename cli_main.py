@@ -956,12 +956,24 @@ def run_single_cycle(
         maybe_fill_profile_step(device=device, last_names=last_names)
 
         device.restore_root()
-        session_path = session_generator.generate_session(
-            phone_number=phone_number,
-            device_controller=device,
-            proxy_dict=proxy_dict,
+
+        # --- ПРЯМАЯ ЭКСТРАКЦИЯ СЕССИИ ИЗ АНДРОИДА ---
+        from auto_reger.sessions import transfer_dat_session, convert_dat_to_session
+
+        LOGGER.info("Extracting raw session files from device %s", device_id)
+        # Вытягиваем tgnet.dat и userconfig.xml через ADB root
+        transfer_dat_session(
+            udid=device_id,
+            package_name=device.telegram_package,
         )
-        LOGGER.info("Session generated for %s: %s", phone_number, session_path)
+
+        LOGGER.info("Converting Android raw files to Telethon session for %s", phone_number)
+        conversion_success = convert_dat_to_session(phone_number=phone_number)
+
+        if not conversion_success:
+            raise RuntimeError("Failed to convert Android session to Telethon session.")
+
+        LOGGER.info("Direct session extraction and conversion completed for %s", phone_number)
 
         safe_set_activation_done(sms_api=sms_api, activation_id=activation_id)
         remove_activation_from_json(activation_id)
