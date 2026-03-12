@@ -881,10 +881,10 @@ def run_single_cycle(
         email_api = build_email_api()
 
         device.connect()
-        record_proc = device.start_recording(remote_video_path)
         if not device.is_ready():
             raise RuntimeError(f"Device {device_id} is not ready for registration.")
         device.hide_root()
+        record_proc = device.start_recording(remote_video_path)
 
         country = str(CONFIG.get("registration", {}).get("default_country", "US")).strip() or "US"
         proxy_data = proxy_api.get_proxy(country_code=country)
