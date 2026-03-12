@@ -224,20 +224,29 @@ def build_email_api() -> EmailApi:
     )
 
 
-def build_session_generator() -> SessionGenerator:
+def build_session_generator(
+    device_fingerprint: Optional[Dict[str, str]] = None,
+) -> SessionGenerator:
     telethon_cfg = CONFIG.get("telethon", {})
-    api_id = telethon_cfg.get("api_id")
-    api_hash = telethon_cfg.get("api_hash")
-    if not api_id or not api_hash:
-        raise ValueError("Missing telethon.api_id or telethon.api_hash in config.yaml")
+    system_lang_code = str(telethon_cfg.get("system_lang_code", "en")).strip() or "en"
+    lang_code = str(telethon_cfg.get("lang_code", "en")).strip() or "en"
+    device_model: Optional[str] = None
+    system_version: Optional[str] = None
+    app_version: Optional[str] = None
+    if device_fingerprint:
+        device_model = str(device_fingerprint.get("device_model", "")).strip() or None
+        system_version = str(device_fingerprint.get("system_version", "")).strip() or None
+        app_version = str(device_fingerprint.get("app_version", "")).strip() or None
 
     return SessionGenerator(
-        api_id=int(api_id),
-        api_hash=str(api_hash),
+        api_id=6,
+        api_hash="eb06d4abfb49dc3eeb1aeb98ae0f581e",
         sessions_dir=Path("sessions"),
-        app_version=str(telethon_cfg.get("app_version", "11.8.3")),
-        system_lang_code=str(telethon_cfg.get("system_lang_code", "en")),
-        lang_code=str(telethon_cfg.get("lang_code", "en")),
+        device_model=device_model,
+        system_version=system_version,
+        app_version=app_version,
+        system_lang_code=system_lang_code,
+        lang_code=lang_code,
     )
 
 
@@ -867,7 +876,6 @@ def run_single_cycle(
 
         device = DeviceController(device_id=device_id)
         email_api = build_email_api()
-        session_generator = build_session_generator()
 
         device.connect()
         record_proc = device.start_recording(remote_video_path)
@@ -959,23 +967,31 @@ def run_single_cycle(
 
         device.restore_root()
 
-        # --- ПРЯМАЯ ЭКСТРАКЦИЯ СЕССИИ ИЗ АНДРОИДА ---
-        from auto_reger.sessions import transfer_dat_session, convert_dat_to_session
+        LOGGER.info("Starting Telethon post-registration login for %s", phone_number)
+        device_fingerprint: Dict[str, str] = {}
+        try:
+            if hasattr(device, "get_device_fingerprint"):
+                device_fingerprint = device.get_device_fingerprint()
+            else:
+                device_fingerprint = device.get_device_info()
+        except Exception:
+            LOGGER.exception(
+                "Failed to collect device fingerprint for Telethon login on %s",
+                device_id,
+            )
+            device_fingerprint = {}
 
-        LOGGER.info("Extracting raw session files from device %s", device_id)
-        # Вытягиваем tgnet.dat и userconfig.xml через ADB root
-        transfer_dat_session(
-            udid=device_id,
-            package_name=device.telegram_package,
-        )
-
-        LOGGER.info("Converting Android raw files to Telethon session for %s", phone_number)
-        conversion_success = convert_dat_to_session(phone_number=phone_number)
-
-        if not conversion_success:
-            raise RuntimeError("Failed to convert Android session to Telethon session.")
-
-        LOGGER.info("Direct session extraction and conversion completed for %s", phone_number)
+        session_generator = build_session_generator(device_fingerprint=device_fingerprint)
+        try:
+            session_path = session_generator.generate_session(
+                phone_number=phone_number,
+                device_controller=device,
+                proxy_dict=proxy_dict,
+            )
+            LOGGER.info("Telethon session saved for %s at %s", phone_number, session_path)
+        except Exception:
+            LOGGER.exception("Telethon login failed for %s", phone_number)
+            raise
 
         safe_set_activation_done(sms_api=sms_api, activation_id=activation_id)
         remove_activation_from_json(activation_id)

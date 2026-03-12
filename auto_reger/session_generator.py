@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from telethon import TelegramClient
-from telethon.errors import SessionPasswordNeededError
+from telethon.errors import FloodWaitError, SessionPasswordNeededError
 
 from .utils import PROJECT_ROOT
 
@@ -20,6 +20,10 @@ except Exception:  # pragma: no cover - runtime fallback for environments withou
 
 
 LOGGER = logging.getLogger(__name__)
+
+OFFICIAL_ANDROID_API_ID = 6
+OFFICIAL_ANDROID_API_HASH = "eb06d4abfb49dc3eeb1aeb98ae0f581e"
+DEFAULT_ANDROID_APP_VERSION = "11.8.3"
 
 
 class SessionGenerator:
@@ -36,10 +40,12 @@ class SessionGenerator:
 
     def __init__(
         self,
-        api_id: int,
-        api_hash: str,
+        api_id: Optional[int] = None,
+        api_hash: Optional[str] = None,
         sessions_dir: str | Path = "sessions",
-        app_version: str = "11.8.3",
+        device_model: Optional[str] = None,
+        system_version: Optional[str] = None,
+        app_version: Optional[str] = None,
         system_lang_code: str = "en",
         lang_code: str = "en",
         code_delivery_wait_seconds: float = 8.0,
@@ -48,21 +54,33 @@ class SessionGenerator:
         :param api_id: Telegram API ID.
         :param api_hash: Telegram API hash.
         :param sessions_dir: Directory where `.session` files are stored.
-        :param app_version: Telethon client app version metadata.
+        :param device_model: Android device model for Telethon metadata.
+        :param system_version: Android system version for Telethon metadata.
+        :param app_version: Telegram Android app version for Telethon metadata.
         :param system_lang_code: System language code sent to Telegram.
         :param lang_code: App language code sent to Telegram.
         :param code_delivery_wait_seconds: Pause before reading code from device.
         """
-        if not api_id or not api_hash:
-            raise ValueError("Both api_id and api_hash are required.")
+        normalized_api_id = int(api_id) if api_id else None
+        normalized_api_hash = str(api_hash).strip() if api_hash else ""
+        if (
+            (normalized_api_id and normalized_api_id != OFFICIAL_ANDROID_API_ID)
+            or (normalized_api_hash and normalized_api_hash != OFFICIAL_ANDROID_API_HASH)
+        ):
+            LOGGER.warning(
+                "Overriding custom Telethon api_id/api_hash with official Telegram Android keys."
+            )
 
-        self.api_id = int(api_id)
-        self.api_hash = str(api_hash)
+        self.api_id = OFFICIAL_ANDROID_API_ID
+        self.api_hash = OFFICIAL_ANDROID_API_HASH
         self.sessions_dir = Path(sessions_dir)
         if not self.sessions_dir.is_absolute():
             self.sessions_dir = PROJECT_ROOT / self.sessions_dir
 
-        self.app_version = app_version
+        self.device_model = str(device_model or "").strip()
+        self.system_version = str(system_version or "").strip()
+        self.device_app_version = str(app_version or "").strip()
+        self.default_app_version = DEFAULT_ANDROID_APP_VERSION
         self.system_lang_code = system_lang_code
         self.lang_code = lang_code
         self.code_delivery_wait_seconds = float(code_delivery_wait_seconds)
@@ -106,7 +124,16 @@ class SessionGenerator:
         fingerprint_file = self._fingerprint_path(session_file)
         stored_fingerprint = self._load_fingerprint(fingerprint_file)
         live_fingerprint = self._safe_collect_fingerprint(device_controller)
-        device_info = self._resolve_device_metadata(stored_fingerprint, live_fingerprint)
+        explicit_fingerprint = {
+            "device_model": self.device_model,
+            "system_version": self.system_version,
+            "app_version": self.device_app_version,
+        }
+        device_info = self._resolve_device_metadata(
+            explicit_fingerprint=explicit_fingerprint,
+            stored_fingerprint=stored_fingerprint,
+            live_fingerprint=live_fingerprint,
+        )
         proxy_tuple = self._build_proxy(proxy_dict)
 
         LOGGER.info(
@@ -123,7 +150,7 @@ class SessionGenerator:
             api_hash=self.api_hash,
             device_model=str(device_info.get("device_model", "Android")),
             system_version=str(device_info.get("system_version", "Android")),
-            app_version=str(device_info.get("app_version", self.app_version)),
+            app_version=str(device_info.get("app_version", self.default_app_version)),
             system_lang_code=self.system_lang_code,
             lang_code=self.lang_code,
             proxy=proxy_tuple,
@@ -147,11 +174,16 @@ class SessionGenerator:
 
             await asyncio.sleep(self.code_delivery_wait_seconds)
             device_controller.open_telegram_system_chat()
-            code = device_controller.read_telegram_code_from_screen()
+            raw_code = device_controller.read_telegram_code_from_screen()
+            code_digits = re.sub(r"\D", "", str(raw_code or ""))
+            if len(code_digits) != 5:
+                raise RuntimeError(
+                    f"Telegram login code was not detected or invalid: {raw_code!r}"
+                )
 
             await client.sign_in(
                 phone=phone_number,
-                code=code,
+                code=code_digits,
                 phone_code_hash=sent.phone_code_hash,
             )
             final_fingerprint = self._safe_collect_fingerprint(device_controller) or live_fingerprint or device_info
@@ -166,6 +198,11 @@ class SessionGenerator:
         except SessionPasswordNeededError as exc:
             LOGGER.error("2FA password required for %s; cannot auto-complete session", phone_number)
             raise RuntimeError("Session generation failed: account requires 2FA password.") from exc
+        except FloodWaitError as exc:
+            LOGGER.error("Telethon FloodWait for %s: wait %ss", phone_number, exc.seconds)
+            raise RuntimeError(
+                f"Session generation failed: FloodWaitError ({exc.seconds}s)."
+            ) from exc
         finally:
             await client.disconnect()
 
@@ -220,6 +257,7 @@ class SessionGenerator:
 
     def _resolve_device_metadata(
         self,
+        explicit_fingerprint: Dict[str, str],
         stored_fingerprint: Dict[str, str],
         live_fingerprint: Dict[str, str],
     ) -> Dict[str, str]:
@@ -228,7 +266,7 @@ class SessionGenerator:
             "system_version": "",
             "app_version": "",
         }
-        for source in (stored_fingerprint, live_fingerprint):
+        for source in (explicit_fingerprint, live_fingerprint, stored_fingerprint):
             for key in merged:
                 value = str(source.get(key, "")).strip()
                 if value:
@@ -239,7 +277,7 @@ class SessionGenerator:
         if not merged["system_version"]:
             merged["system_version"] = "Android"
         if not merged["app_version"]:
-            merged["app_version"] = self.app_version
+            merged["app_version"] = self.default_app_version
         return merged
 
     @staticmethod
