@@ -1530,12 +1530,16 @@ class DeviceController:
             timeout=15,
         )
         packages_out = result.stdout or ""
-        # Добавлен Telegram X (challegram)
+        
+        # Добавлены все популярные форки для авторега
         candidates = [
-            "org.telegram.messenger.web",
             "org.telegram.messenger",
+            "org.telegram.messenger.web",
             "org.telegram.messenger.beta",
             "org.thunderdog.challegram",
+            "tw.nekomimi.nekogram",          # Nekogram
+            "org.telegram.messenger.foss",   # Telegram FOSS
+            "com.ayugram.app",               # AyuGram
         ]
 
         for package_name in candidates:
@@ -1544,13 +1548,13 @@ class DeviceController:
                 LOGGER.info("Successfully detected Telegram package: %s", package_name)
                 return True
 
+        # Расширенный поиск по ключевым словам
         telegram_lines = [
-            line
-            for line in packages_out.splitlines()
-            if "telegram" in line.lower() or "thunderdog" in line.lower()
+            line for line in packages_out.splitlines() 
+            if any(kw in line.lower() for kw in ("telegram", "thunderdog", "nekomimi", "ayugram"))
         ]
         LOGGER.error(
-            "Could not find exact Telegram package. Lines containing 'telegram/thunderdog': %s",
+            "Could not find exact Telegram package. Lines containing matching keywords: %s",
             telegram_lines,
         )
         return False
