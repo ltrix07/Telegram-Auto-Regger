@@ -733,19 +733,14 @@ class DeviceController:
         return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def stop_recording_and_pull(self, proc: subprocess.Popen, remote_path: str, local_path: str) -> bool:
-        try:
-            proc.send_signal(signal.SIGINT)
-        except Exception:
-            pass
-
-        self._adb("shell", "pkill", "-INT", "screenrecord", check=False, timeout=5)
-        self._adb("shell", "killall", "-2", "screenrecord", check=False, timeout=5)
+        self._adb("shell", "pkill -INT screenrecord", check=False, timeout=5)
+        self._adb("shell", "killall -2 screenrecord", check=False, timeout=5)
         try:
             proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
+        except Exception:
             proc.kill()
 
-        time.sleep(2.0)
+        time.sleep(3.0)
         self._adb("pull", remote_path, local_path, check=False, timeout=30)
         self._adb("shell", "rm", "-f", remote_path, check=False, timeout=5)
 
