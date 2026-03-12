@@ -1172,37 +1172,56 @@ class DeviceController:
     def input_phone(self, phone_number: str, country_code: Optional[str] = None) -> None:
         """
         Best-effort fill Telegram phone form and continue.
-
-        :param phone_number: Phone number in any format (digits/+ accepted).
-        :param country_code: Optional country code like ``+1``.
         """
         LOGGER.info("Inputting phone number on Telegram UI")
         self._safe_tap_by_text_candidates(self.START_MESSAGING_TEXT_CANDIDATES, reason="start messaging")
         self._safe_tap_by_text_candidates(self.CONTINUE_TEXT_CANDIDATES, reason="continue")
         self._tap_system_allow_button()
 
-        if country_code:
-            cc_digits = re.sub(r"\D", "", country_code)
-            if cc_digits and self._safe_tap_telegram_resources(
+        phone_digits = re.sub(r"\D", "", phone_number)
+        cc_digits = re.sub(r"\D", "", country_code) if country_code else ""
+
+        # Убираем код страны из начала номера, чтобы не напечатать его дважды
+        if cc_digits and phone_digits.startswith(cc_digits):
+            phone_digits = phone_digits[len(cc_digits):]
+
+        if cc_digits:
+            tapped_cc = self._safe_tap_telegram_resources(
                 self.PHONE_COUNTRY_CODE_RESOURCE_ID_SUFFIXES,
                 reason="country code field",
-            ):
-                self._input_text(cc_digits)
+            )
+            if not tapped_cc:
+                # Fallback: Координаты для поля кода страны (левая часть экрана над линией)
+                self._tap_percent(0.20, 0.42)
+                LOGGER.debug("Tapped country code field by fallback coordinates")
 
-        phone_digits = re.sub(r"\D", "", phone_number)
-        if self._safe_tap_telegram_resources(self.PHONE_NUMBER_RESOURCE_ID_SUFFIXES, reason="phone number field"):
-            self._input_text(phone_digits)
-        else:
-            # TODO: calibrate coordinates for your Telegram build if no resource-id found.
-            self._tap_percent(0.5, 0.42)
-            self._input_text(phone_digits)
+            # Стираем дефолтный код страны (эмулятор мог подставить локальный код)
+            for _ in range(4):
+                self._adb("shell", "input", "keyevent", "67", check=False)  # KEYCODE_DEL (Backspace)
 
-        if not self._safe_tap_telegram_resources(
-            ("login_btn", "next_button", "done_button", "ok_button"),
-            reason="submit phone number",
-        ):
-            self._safe_tap_by_text_candidates(self.NEXT_DONE_TEXT_CANDIDATES, reason="submit phone number")
-            self._adb("shell", "input", "keyevent", "66", check=False)
+            self._input_text(cc_digits)
+            time.sleep(0.5)
+
+        tapped_phone = self._safe_tap_telegram_resources(
+            self.PHONE_NUMBER_RESOURCE_ID_SUFFIXES,
+            reason="phone number field",
+        )
+        if not tapped_phone:
+            # Fallback: Координаты для основного поля номера (центр/правая часть экрана)
+            self._tap_percent(0.60, 0.42)
+            LOGGER.debug("Tapped phone number field by fallback coordinates")
+
+        self._input_text(phone_digits)
+        time.sleep(0.5)
+
+        # Добавляем ID круглой кнопки (Floating Action Button), которую используют форки
+        next_btn_resources = ("login_btn", "next_button", "done_button", "ok_button", "floating_button", "fab")
+
+        if not self._safe_tap_telegram_resources(next_btn_resources, reason="submit phone number"):
+            if not self._safe_tap_by_text_candidates(self.NEXT_DONE_TEXT_CANDIDATES, reason="submit phone number"):
+                # Fallback: Координаты круглой кнопки "Далее" (правый нижний угол)
+                self._tap_percent(0.85, 0.85)
+            self._adb("shell", "input", "keyevent", "66", check=False)  # KEYCODE_ENTER
             self.invalidate_ui_dump_cache()
 
         self._safe_tap_by_text_candidates(["yes", "да"], reason="confirm phone number")
