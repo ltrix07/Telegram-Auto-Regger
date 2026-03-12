@@ -9,6 +9,7 @@ services:
       - androidboot.redroid_width=720
       - androidboot.redroid_height=1280
       - androidboot.redroid_fps=30
+      - androidboot.use_memfd=1
     environment:
       # --- Уникальный отпечаток (Samsung Galaxy S21 / Android 11) ---
       - ro.product.model=SM-G991U
