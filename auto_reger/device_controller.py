@@ -882,8 +882,11 @@ class DeviceController:
             "-W",
             "-a",
             "android.intent.action.VIEW",
+            "-c",
+            "android.intent.category.BROWSABLE",
             "-d",
             safe_deep_link,
+            "-p",
             self.telegram_package,
         )
         output = f"{result.stdout}\n{result.stderr}".lower()
