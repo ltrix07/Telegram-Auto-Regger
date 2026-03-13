@@ -129,6 +129,11 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Single ADB serial override. Can be passed multiple times.",
     )
+    parser.add_argument(
+        "--root",
+        action="store_true",
+        help="Enable root access requirement for ADB commands.",
+    )
     return parser.parse_args()
 
 
@@ -821,6 +826,7 @@ def run_single_cycle(
     sms_api: SmsApi,
     last_names: list[str],
     notifier: Optional[TelegramNotifier],
+    require_root: bool,
 ) -> CycleResult:
     device_id = ""
     device: Optional[DeviceController] = None
@@ -877,7 +883,7 @@ def run_single_cycle(
             device_id,
         )
 
-        device = DeviceController(device_id=device_id)
+        device = DeviceController(device_id=device_id, require_root=require_root)
         email_api = build_email_api()
 
         device.connect()
@@ -1155,6 +1161,7 @@ def run(notifier: Optional[TelegramNotifier] = None) -> int:
     args = parse_args()
     setup_logging()
     runtime_notifier = notifier or build_telegram_notifier()
+    require_root = args.root
 
     if args.count < 1:
         raise ValueError("--count must be >= 1")
@@ -1214,6 +1221,7 @@ def run(notifier: Optional[TelegramNotifier] = None) -> int:
                         sms_api=shared_sms_api,
                         last_names=last_names,
                         notifier=runtime_notifier,
+                        require_root=require_root,
                     )
                 )
                 active += 1

@@ -240,7 +240,7 @@ class DeviceController:
         "@",
     )
 
-    def __init__(self, device_id: str, adb_path: str = "adb") -> None:
+    def __init__(self, device_id: str, adb_path: str = "adb", require_root: bool = False) -> None:
         """
         :param device_id: ADB serial, e.g. ``emulator-5554`` or ``127.0.0.1:5555``.
         :param adb_path: ADB binary path. Defaults to ``adb`` from PATH.
@@ -251,9 +251,10 @@ class DeviceController:
 
         self.device_id = normalized
         self.adb_path = adb_path
+        self.require_root = bool(require_root)
         self.telegram_package = self.TELEGRAM_PACKAGE
         self.debug_dir = PROJECT_ROOT / "debug"
-        self._root_mode: Optional[str] = None
+        self._root_mode: Optional[str] = "none"
         self._root_checked = False
         self._ui_xml_cache: Optional[str] = None
         self._ui_root_cache: Optional[ET.Element] = None
@@ -326,6 +327,11 @@ class DeviceController:
         Preferred mode is ``adb root`` (adbd as root). If unavailable, falls
         back to ``su -c`` shell commands.
         """
+        if not self.require_root:
+            self._root_checked = True
+            self._root_mode = "none"
+            return
+
         if self._root_checked:
             if not self._root_mode:
                 raise RuntimeError(f"Root access is unavailable on {self.device_id}")
@@ -417,7 +423,7 @@ class DeviceController:
             if not shell_args:
                 return self._run_adb(*args, check=check, timeout=timeout)
 
-            if self._root_mode == "adbd":
+            if self._root_mode in ("adbd", "none"):
                 return self._run_adb("shell", *shell_args, check=check, timeout=timeout)
 
             root_command = shlex.join(shell_args)
@@ -486,6 +492,9 @@ class DeviceController:
         """
         Hide su binaries by renaming them while keeping adbd root (ghost root).
         """
+        if not self.require_root:
+            return True
+
         try:
             self._run_adb("root", check=False, timeout=20)
             time.sleep(0.8)
@@ -513,6 +522,9 @@ class DeviceController:
         """
         Restore su binaries back to their original paths.
         """
+        if not self.require_root:
+            return True
+
         try:
             self._ensure_root_access()
         except Exception as exc:
