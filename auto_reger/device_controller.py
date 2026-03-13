@@ -198,8 +198,16 @@ class DeviceController:
     TOO_MANY_ATTEMPTS_TEXT_CANDIDATES = (
         "too many attempts",
         "try again later",
-        "\u0441\u043b\u0438\u0448\u043a\u043e\u043c \u043c\u043d\u043e\u0433\u043e \u043f\u043e\u043f\u044b\u0442\u043e\u043a",
-        "\u043f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u043f\u043e\u0437\u0436\u0435",
+        "слишком много попыток",
+        "попробуйте позже",
+    )
+    API_ERROR_TEXT_CANDIDATES = (
+        "email_code_empty",
+        "api_error",
+        "rpc_error",
+        "internal server error",
+        "an error occurred",
+        "произошла ошибка",
     )
     EXISTING_ACCOUNT_TEXT_CANDIDATES = (
         "check your telegram messages",
@@ -1619,6 +1627,10 @@ class DeviceController:
         if self._screen_contains_candidates(self.EMAIL_BANNED_TEXT_CANDIDATES):
             self._safe_tap_by_text_candidates(self.OK_TEXT_CANDIDATES, reason="banned email dialog")
             raise RuntimeError(f"Telegram rejected email on `{step_name}`: email is banned.")
+
+        if self._screen_contains_candidates(self.API_ERROR_TEXT_CANDIDATES):
+            self._safe_tap_by_text_candidates(self.OK_TEXT_CANDIDATES, reason="api error dialog")
+            raise RuntimeError(f"Telegram API error (e.g., EMAIL_CODE_EMPTY) rejected request on `{step_name}`.")
 
         if self._screen_contains_candidates(self.TOO_MANY_ATTEMPTS_TEXT_CANDIDATES):
             raise RuntimeError(f"Telegram blocked retries on `{step_name}`: too many attempts.")
