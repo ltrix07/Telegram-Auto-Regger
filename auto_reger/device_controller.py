@@ -1124,9 +1124,11 @@ class DeviceController:
             self.invalidate_ui_dump_cache()
 
             # Если видим стартовую кнопку - кликаем и ждем анимацию перехода
-            if self._tap_by_text_candidates(self.START_MESSAGING_TEXT_CANDIDATES):
+            if self.wait_and_tap_by_text(self.START_MESSAGING_TEXT_CANDIDATES, timeout=15.0):
                 LOGGER.info("Tapped 'Start Messaging', waiting for transition...")
-                time.sleep(2.0)
+                time.sleep(5.0)
+                self.wait_for_ui_state(text_candidates=["Phone number", "Your Phone"], timeout=10.0)
+                LOGGER.info("Reached phone input screen, ready for proxy.")
                 continue
 
             # Если видим промежуточные окна разрешений/языка - кликаем

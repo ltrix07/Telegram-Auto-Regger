@@ -940,6 +940,7 @@ def run_single_cycle(
             )
 
         try:
+            time.sleep(3.0)
             device.enable_telegram_proxy_popup(timeout=25.0)
         except TimeoutError as exc:
             raise RuntimeError(
