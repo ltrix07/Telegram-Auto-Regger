@@ -916,6 +916,18 @@ class DeviceController:
             "yes" if username and user_password else "no",
         )
 
+        # Обработка системного окна "Открыть с помощью" (App Chooser)
+        time.sleep(2.0)
+        self.invalidate_ui_dump_cache()
+        if self.screen_contains_any(["Telegram X", "Telegram", "Just once", "Только сейчас", "Always"]):
+            LOGGER.info("System App Chooser detected. Selecting Telegram app to handle the intent...")
+            # Кликаем по названию приложения
+            self._safe_tap_by_text_candidates(["Telegram X", "Telegram", "Challegram"], reason="select app in chooser")
+            time.sleep(0.5)
+            # Подтверждаем выбор (если Android просит)
+            self._safe_tap_by_text_candidates(["Always", "Just once", "Всегда", "Только сейчас"], reason="confirm app in chooser")
+            time.sleep(1.0)
+
         # "Двойной выстрел": Telegram X при холодном старте часто игнорирует первый Intent.
         # Отправляем интент повторно, чтобы гарантированно триггернуть окно поверх экрана Start.
         time.sleep(1.5)
