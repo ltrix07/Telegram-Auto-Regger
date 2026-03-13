@@ -1050,39 +1050,71 @@ class DeviceController:
         """
         Launch official Telegram or fork app via am start command
         and dynamically wait for the UI to fully render and pass the start screen.
+        This method uses an aggressive launch strategy to bypass background start restrictions.
         """
         LOGGER.info("Launching Telegram on %s", self.device_id)
         self.invalidate_ui_dump_cache()
 
-        # Give the system a moment to settle after potential APK installation.
-        time.sleep(5.0)
+        # Give the system time to fully initialize the graphics stack, especially on single-core CPUs.
+        time.sleep(15.0)
 
         # Determine the correct main activity for the detected package.
-        # This is needed because `am start` is explicit, unlike the original `monkey` command.
         activity_suffix = ".ui.LaunchActivity"  # Default for official client and most forks
         if self.telegram_package == "org.thunderdog.challegram":
-            activity_suffix = ".MainActivity"  # For Telegram X, as per user's context
+            activity_suffix = ".MainActivity"  # For Telegram X
 
-        component_name = f"{self.telegram_package}/{activity_suffix.lstrip('.')}"
+        # Correctly form the component name. The '.' prefix is a shortcut for the package name.
+        component_name = f"{self.telegram_package}/{activity_suffix}"
+
+        # Aggressive launch command to bypass background start restrictions, as requested for Android 11+
+        launch_command_args = [
+            "shell", "am", "start", "-W", "-n", component_name,
+            "-a", "android.intent.action.MAIN",
+            "-c", "android.intent.category.LAUNCHER",
+            "--windowingMode", "1"
+        ]
+
+        # More reliable process check command
+        process_check_command_args = ["shell", "ps", "-A", "|", "grep", self.telegram_package]
         launched = False
 
-        for attempt in range(1, 11):
-            LOGGER.info("Attempting to launch Telegram via am start (attempt %d/10): %s", attempt, component_name)
-            self._adb("shell", "am", "start", "-n", component_name, check=False)
+        # Total attempts: 3 regular + 1 fallback with HOME key
+        for attempt in range(1, 5):
+            LOGGER.info(
+                "Attempting to launch Telegram (attempt %d/4): %s",
+                attempt,
+                component_name
+            )
 
-            # Give a moment for the process to start before checking for its PID.
-            time.sleep(1.0)
-            pid_result = self._adb("shell", "pidof", self.telegram_package, check=False)
-            if pid_result.stdout and pid_result.stdout.strip():
-                LOGGER.info("Successfully launched %s, process found with PID: %s", self.telegram_package, pid_result.stdout.strip())
+            # On the 4th attempt (after 3 failures), try the Home key fallback.
+            if attempt == 4:
+                LOGGER.warning("Final launch attempt: using Home key fallback.")
+                self._adb("shell", "input", "keyevent", "3", check=False)  # Home button
+                time.sleep(2.0)
+
+            self._adb(*launch_command_args, check=False)
+            time.sleep(2.0)  # Wait for process to appear
+
+            # Check if the process is running
+            pid_result = self._adb(*process_check_command_args, check=False)
+
+            if pid_result.stdout and self.telegram_package in pid_result.stdout:
+                LOGGER.info(
+                    "Successfully launched %s, process found:\n%s",
+                    self.telegram_package,
+                    pid_result.stdout.strip()
+                )
                 launched = True
                 break
 
-            LOGGER.warning("Process for %s not found after 'am start'. Retrying in 5 seconds...", self.telegram_package)
-            time.sleep(5.0)
+            LOGGER.warning(
+                "Process for %s not found after 'am start'. Retrying...",
+                self.telegram_package
+            )
+            time.sleep(3.0)
 
         if not launched:
-            raise RuntimeError(f"Failed to launch Telegram and confirm process start after 10 attempts on {self.device_id}.")
+            raise RuntimeError(f"Failed to launch Telegram and confirm process start after 4 attempts on {self.device_id}.")
 
         LOGGER.info("Waiting for app interface to load (first launch may take 60+ seconds)...")
         deadline = time.time() + 60.0
