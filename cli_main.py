@@ -51,8 +51,8 @@ ROUTINE_ALERT_SKIP_PATTERNS: tuple[str, ...] = (
     "failed to set proxy",
     "proxy apply verification failed",
     "proxy api returned an empty list",
-    "telegram proxy intent failed",
-    "telegram proxy popup was not confirmed",
+    # "telegram proxy intent failed",
+    # "telegram proxy popup was not confirmed",
     "proxy must be socks5",
     "internet connectivity check failed",
     "number is already registered",
@@ -1021,6 +1021,7 @@ def run_single_cycle(
             ).with_suffix(".mp4")
             if device.stop_recording_and_pull(record_proc, remote_video_path, str(local_video)):
                 video_path = str(local_video)
+                LOGGER.info("👉 DEBUG VIDEO SAVED LOCALLY: %s", video_path)
 
         screenshot_path: Optional[str] = None
         screenshot_failed = False
