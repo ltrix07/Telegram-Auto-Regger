@@ -932,20 +932,17 @@ class DeviceController:
         """
         if self.telegram_package == "org.thunderdog.challegram":
             LOGGER.info("Telegram X proxy popup detected. Using blind tap to click 'Enable'...")
-            time.sleep(2.5)  # Ждем, пока диалог плавно появится
-
-            # Слепой тап в зону кнопки Enable (правый нижний угол диалогового окна)
-            self._tap_percent(0.80, 0.58)
-            time.sleep(0.3)
-            self._tap_percent(0.80, 0.62)
-
-            # Системное нажатие Enter (если фокус по умолчанию стоит на кнопке подтверждения)
-            self._adb("shell", "input", "keyevent", "66", check=False)
-            time.sleep(2.0)
-
+            time.sleep(2.5)
+            
+            # Смещаем клик правее (X=0.88), чтобы точно попасть в 'Enable'
+            self._tap_percent(0.88, 0.65)
+            time.sleep(0.5)
+            self._tap_percent(0.88, 0.68)
+            
+            # Убираем системный Enter, чтобы случайно не триггернуть 'Cancel'
+            time.sleep(1.5)
+            
             LOGGER.info("Blind tap completed for Telegram X proxy.")
-
-            # После прокси нужно нажать Start Messaging, чтобы пойти дальше
             self.wait_and_tap_by_text(self.START_MESSAGING_TEXT_CANDIDATES, timeout=10.0, reason="start messaging after proxy")
             return "blind-tap-telegram-x"
         normalized_candidates = [
@@ -1419,20 +1416,17 @@ class DeviceController:
         if not ui_ready:
             raise RuntimeError("Telegram UI failed to render code input fields in time.")
 
-        if not self._safe_tap_telegram_resources(self.CODE_RESOURCE_ID_SUFFIXES, reason="code field"):
-            if not self._safe_tap_by_text_candidates(self.CODE_TEXT_CANDIDATES, reason="code field"):
-                self._tap_percent(0.5, 0.36)
+        # Убираем агрессивные клики, просто даем время клавиатуре и вводим код
+        time.sleep(1.0)
         self._input_text(str(code))
-        self._adb("shell", "input", "keyevent", "66", check=False)
-
-        # Ждем загрузки следующего экрана (профиля, 2FA или возможного бана после ввода)
+        # УДАЛЕНО: self._adb("shell", "input", "keyevent", "66", check=False)
+        
         self.wait_for_ui_state(
             timeout=8.0,
             check_blockers=True,
             step_name="post code confirmation",
             include_existing_account=False,
         )
-
         self._handle_post_action_popups(rounds=2, include_accept=False)
         self._handle_two_factor_reset_flow()
         self._handle_post_action_popups(rounds=3, include_accept=False)
@@ -1491,7 +1485,7 @@ class DeviceController:
             include_existing_account=False,
         )
         if not ui_ready:
-            LOGGER.warning("Profile UI didn't fully render, proceeding with fallback logic.")
+            raise RuntimeError("Profile UI didn't fully render or stuck on previous step. Aborting to prevent blind typing.")
 
         if self._safe_tap_telegram_resources(self.FIRST_NAME_RESOURCE_ID_SUFFIXES, reason="first name field"):
             self._input_text(first_name)
@@ -2032,11 +2026,12 @@ class DeviceController:
         text = str(value)
         if not text:
             return
-        chunk_size = 3
+        chunk_size = 2  # Уменьшили чанк для надежности
         for i in range(0, len(text), chunk_size):
             chunk = text[i : i + chunk_size]
             safe_chunk = self._escape_adb_text(chunk)
             self._adb("shell", "input", "text", safe_chunk)
+            time.sleep(0.15)  # Пауза, чтобы UI успел отрисовать цифры
         self.invalidate_ui_dump_cache()
 
     @staticmethod
