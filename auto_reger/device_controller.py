@@ -1054,8 +1054,8 @@ class DeviceController:
         LOGGER.info("Launching Telegram on %s", self.device_id)
         self.invalidate_ui_dump_cache()
 
-        time.sleep(3.0)  # Даем системе время на базовую обработку нового пакета
-        for attempt in range(1, 5):
+        time.sleep(10.0)  # APK post-install processes on Android can max out a single core CPU
+        for attempt in range(1, 16):
             result = self._adb(
                 "shell",
                 "monkey",
@@ -1072,20 +1072,19 @@ class DeviceController:
                 break
             else:
                 LOGGER.warning(
-                    "Monkey launch attempt %d failed for %s. Retrying... Output: %s",
+                    "Monkey launch attempt %d failed for %s. Server might be overloaded due to 1 CPU limit. Retrying... Output: %s",
                     attempt,
                     self.telegram_package,
                     output.strip(),
                 )
-                time.sleep(3.0)
+                time.sleep(10.0)
         else:
-            raise RuntimeError(f"Failed to launch Telegram via monkey after 4 attempts on {self.device_id}")
+            raise RuntimeError(f"Failed to launch Telegram via monkey after 15 attempts on {self.device_id}. Check CPU load.")
 
         time.sleep(4.0)
 
-        LOGGER.info("Waiting for app interface to load (first launch may take 30+ seconds)...")
-        # Увеличиваем таймаут до 45 секунд для свежих контейнеров
-        deadline = time.time() + 45.0
+        LOGGER.info("Waiting for app interface to load (first launch may take 60+ seconds)...")
+        deadline = time.time() + 60.0
         app_ready = False
 
         while time.time() < deadline:
