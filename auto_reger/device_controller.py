@@ -871,16 +871,12 @@ class DeviceController:
 
         safe_deep_link = f"'{deep_link}'"
 
-        # Небольшая пауза, чтобы Telegram X гарантированно загрузил обработчики ссылок
+        # Даем приложению дополнительное время полностью отрисоваться
         time.sleep(2.5)
 
-        # Явное указание Activity для более надежной доставки интента
-        if self.telegram_package == "org.thunderdog.challegram":
-            component_name = f"{self.telegram_package}/.MainActivity"
-        else:
-            component_name = f"{self.telegram_package}/.ui.LaunchActivity"
-
-        result = self._run_adb(
+        # Добавляем флаг NEW_TASK (0x10000000) и явно прокидываем windowingMode,
+        # чтобы Android 11+ не проглотил интент из-за ограничений фонового запуска
+        cmd_args = [
             "shell",
             "am",
             "start",
@@ -889,19 +885,24 @@ class DeviceController:
             "android.intent.action.VIEW",
             "-c",
             "android.intent.category.BROWSABLE",
+            "-f",
+            "0x10000000",
+            "--windowingMode",
+            "1",
             "-d",
             safe_deep_link,
-            "-n",  # Используем -n (component) вместо -p (package)
-            component_name,
-        )
-        
+            "-p",
+            self.telegram_package,
+        ]
+
+        # Отправляем интент первый раз
+        result = self._run_adb(*cmd_args)
         output = f"{result.stdout}\n{result.stderr}".lower()
+        
         if result.returncode != 0 or "error:" in output or "exception" in output:
             LOGGER.error(
-                "Failed to open Telegram proxy intent on %s for %s:%s | stdout=%r stderr=%r",
+                "Failed to open Telegram proxy intent on %s | stdout=%r stderr=%r",
                 self.device_id,
-                host,
-                port_value,
                 (result.stdout or "").strip(),
                 (result.stderr or "").strip(),
             )
@@ -914,6 +915,12 @@ class DeviceController:
             port_value,
             "yes" if username and user_password else "no",
         )
+
+        # "Двойной выстрел": Telegram X при холодном старте часто игнорирует первый Intent.
+        # Отправляем интент повторно, чтобы гарантированно триггернуть окно поверх экрана Start.
+        time.sleep(1.5)
+        self._run_adb(*cmd_args, check=False)
+
         return True
 
     def enable_telegram_proxy_popup(self, timeout: float = 25.0, poll_interval: float = 1.5) -> str:
