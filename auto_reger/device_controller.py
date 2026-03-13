@@ -207,8 +207,13 @@ class DeviceController:
         "we've sent the code to the email",
         "we sent a code to your email",
         "check your email",
+        "sent a code to the email address",
+        "sent to the email address",
+        "code to the email",
         "\u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f telegram",
         "\u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u043f\u043e\u0447\u0442\u0443",
+        "\u0432\u0432\u0435\u0434\u0438\u0442\u0435 \u043a\u043e\u0434 \u0438\u0437 \u043f\u0438\u0441\u044c\u043c\u0430",
+        "\u043a\u043e\u0434 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d \u043d\u0430 \u043f\u043e\u0447\u0442\u0443",
     )
     TWO_FA_REQUIRED_TEXT_CANDIDATES = (
         "two-step verification enabled",
@@ -1386,13 +1391,14 @@ class DeviceController:
                 "login_email_field",
             ),
             text_candidates=("your email address", "please enter your email"),
-            timeout=15.0,
+            timeout=25.0,
             check_blockers=True,
             step_name="phone submission",
             include_existing_account=True,
         )
         if not ui_next_ready:
-            LOGGER.warning("Timeout waiting for code/email screen after phone submission")
+            LOGGER.warning("Timeout waiting for code/email screen. Forcing one last check.")
+            self._raise_for_auth_blockers(step_name="phone submission timeout", include_existing_account=True)
 
         self._handle_post_action_popups(rounds=2, include_accept=False)
 
