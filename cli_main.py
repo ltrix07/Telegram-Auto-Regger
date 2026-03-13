@@ -491,12 +491,10 @@ def maybe_handle_email_step(device: DeviceController, email_api: Optional[EmailA
         return
 
     email_screen_patterns = (
-        "check your email",
-        "email",
-        "e-mail",
-        "mail",
-        "почт",
-        "address" # Добавил на всякий случай
+        "your email address",
+        "please enter your email",
+        "e-mail address",
+        "введите адрес",
     )
     email_resource_markers = (
         "email_field",

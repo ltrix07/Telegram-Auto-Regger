@@ -203,6 +203,9 @@ class DeviceController:
     )
     EXISTING_ACCOUNT_TEXT_CANDIDATES = (
         "check your telegram messages",
+        "we've sent a code to the email address",
+        "we've sent the code to the email",
+        "we sent a code to your email",
         "check your email",
         "\u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f telegram",
         "\u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u043f\u043e\u0447\u0442\u0443",
@@ -1275,9 +1278,24 @@ class DeviceController:
             self.invalidate_ui_dump_cache()
 
         self._safe_tap_by_text_candidates(["yes", "да"], reason="confirm phone number")
-        time.sleep(0.5)
-        self.invalidate_ui_dump_cache()
-        self._raise_for_auth_blockers(step_name="phone submission", include_existing_account=True)
+
+        # Ждем загрузки следующего экрана до 15 секунд
+        deadline = time.time() + 15.0
+        while time.time() < deadline:
+            self.invalidate_ui_dump_cache()
+
+            # 1. Проверяем баны ИЛИ отправку кода на чужую почту/в приложение (Скипаем регистрацию)
+            self._raise_for_auth_blockers(step_name="phone submission", include_existing_account=True)
+
+            # 2. Если появилось поле для ввода СМС (Email is not required)
+            # 3. ИЛИ появилось поле для ВВОДА новой почты
+            # -> Значит экран успешно загрузился, прерываем ожидание и идем дальше
+            if self.screen_contains_any(self.CODE_RESOURCE_ID_SUFFIXES) or \
+               self.screen_contains_any(("email_field", "login_email_field", "your email address", "please enter your email")):
+                break
+
+            time.sleep(1.0)
+
         self._handle_post_action_popups(rounds=2, include_accept=False)
 
     def input_code(self, code: str) -> None:
