@@ -929,6 +929,8 @@ def run_single_cycle(
             "password": proxy_password,
         }
 
+        device.launch_telegram()
+
         if not device.set_telegram_proxy_via_intent(
             proxy_host,
             proxy_port,
@@ -961,7 +963,6 @@ def run_single_cycle(
         phone_digits = re.sub(r"\D", "", phone_number)
         country_guess = f"+{phone_digits[:-10]}" if len(phone_digits) > 10 else None
 
-        device.launch_telegram()
         device.input_phone(phone_number=phone_number, country_code=country_guess)
         maybe_handle_email_step(device=device, email_api=email_api)
 
