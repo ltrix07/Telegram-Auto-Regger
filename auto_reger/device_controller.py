@@ -898,7 +898,7 @@ class DeviceController:
         # Отправляем интент первый раз
         result = self._run_adb(*cmd_args)
         output = f"{result.stdout}\n{result.stderr}".lower()
-        
+
         if result.returncode != 0 or "error:" in output or "exception" in output:
             LOGGER.error(
                 "Failed to open Telegram proxy intent on %s | stdout=%r stderr=%r",
@@ -916,18 +916,6 @@ class DeviceController:
             "yes" if username and user_password else "no",
         )
 
-        # Обработка системного окна "Открыть с помощью" (App Chooser)
-        time.sleep(2.0)
-        self.invalidate_ui_dump_cache()
-        if self.screen_contains_any(["Telegram X", "Telegram", "Just once", "Только сейчас", "Always"]):
-            LOGGER.info("System App Chooser detected. Selecting Telegram app to handle the intent...")
-            # Кликаем по названию приложения
-            self._safe_tap_by_text_candidates(["Telegram X", "Telegram", "Challegram"], reason="select app in chooser")
-            time.sleep(0.5)
-            # Подтверждаем выбор (если Android просит)
-            self._safe_tap_by_text_candidates(["Always", "Just once", "Всегда", "Только сейчас"], reason="confirm app in chooser")
-            time.sleep(1.0)
-
         # "Двойной выстрел": Telegram X при холодном старте часто игнорирует первый Intent.
         # Отправляем интент повторно, чтобы гарантированно триггернуть окно поверх экрана Start.
         time.sleep(1.5)
@@ -942,6 +930,24 @@ class DeviceController:
         :return: Selector description used to tap the button.
         :raises TimeoutError: If confirmation button was not found in time.
         """
+        if self.telegram_package == "org.thunderdog.challegram":
+            LOGGER.info("Telegram X proxy popup detected. Using blind tap to click 'Enable'...")
+            time.sleep(2.5)  # Ждем, пока диалог плавно появится
+
+            # Слепой тап в зону кнопки Enable (правый нижний угол диалогового окна)
+            self._tap_percent(0.80, 0.58)
+            time.sleep(0.3)
+            self._tap_percent(0.80, 0.62)
+
+            # Системное нажатие Enter (если фокус по умолчанию стоит на кнопке подтверждения)
+            self._adb("shell", "input", "keyevent", "66", check=False)
+            time.sleep(2.0)
+
+            LOGGER.info("Blind tap completed for Telegram X proxy.")
+
+            # После прокси нужно нажать Start Messaging, чтобы пойти дальше
+            self.wait_and_tap_by_text(self.START_MESSAGING_TEXT_CANDIDATES, timeout=10.0, reason="start messaging after proxy")
+            return "blind-tap-telegram-x"
         normalized_candidates = [
             candidate.strip().lower()
             for candidate in self.PROXY_ENABLE_TEXT_CANDIDATES
