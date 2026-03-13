@@ -847,10 +847,6 @@ class DeviceController:
     ) -> bool:
         """
         Open Telegram SOCKS proxy deep-link and trigger system proxy-enable popup.
-
-        Command pattern:
-          adb -s <device_udid> shell am start -W -a android.intent.action.VIEW \
-            -d "tg://socks?server=<ip>&port=<port>" <detected_telegram_package>
         """
         host = str(ip or "").strip()
         port_raw = str(port or "").strip()
@@ -875,6 +871,15 @@ class DeviceController:
 
         safe_deep_link = f"'{deep_link}'"
 
+        # Небольшая пауза, чтобы Telegram X гарантированно загрузил обработчики ссылок
+        time.sleep(2.5)
+
+        # Явное указание Activity для более надежной доставки интента
+        if self.telegram_package == "org.thunderdog.challegram":
+            component_name = f"{self.telegram_package}/.MainActivity"
+        else:
+            component_name = f"{self.telegram_package}/.ui.LaunchActivity"
+
         result = self._run_adb(
             "shell",
             "am",
@@ -886,9 +891,10 @@ class DeviceController:
             "android.intent.category.BROWSABLE",
             "-d",
             safe_deep_link,
-            "-p",
-            self.telegram_package,
+            "-n",  # Используем -n (component) вместо -p (package)
+            component_name,
         )
+        
         output = f"{result.stdout}\n{result.stderr}".lower()
         if result.returncode != 0 or "error:" in output or "exception" in output:
             LOGGER.error(
