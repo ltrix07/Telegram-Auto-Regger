@@ -1054,16 +1054,33 @@ class DeviceController:
         LOGGER.info("Launching Telegram on %s", self.device_id)
         self.invalidate_ui_dump_cache()
 
-        self._adb(
-            "shell",
-            "monkey",
-            "-p",
-            self.telegram_package,
-            "-c",
-            "android.intent.category.LAUNCHER",
-            "1",
-            check=False,
-        )
+        time.sleep(3.0)  # Даем системе время на базовую обработку нового пакета
+        for attempt in range(1, 5):
+            result = self._adb(
+                "shell",
+                "monkey",
+                "-p",
+                self.telegram_package,
+                "-c",
+                "android.intent.category.LAUNCHER",
+                "1",
+                check=False,
+            )
+            output = f"{result.stdout}\n{result.stderr}"
+            if "Events injected: 1" in output:
+                LOGGER.info("Successfully launched Telegram via monkey (attempt %d)", attempt)
+                break
+            else:
+                LOGGER.warning(
+                    "Monkey launch attempt %d failed for %s. Retrying... Output: %s",
+                    attempt,
+                    self.telegram_package,
+                    output.strip(),
+                )
+                time.sleep(3.0)
+        else:
+            raise RuntimeError(f"Failed to launch Telegram via monkey after 4 attempts on {self.device_id}")
+
         time.sleep(4.0)
 
         LOGGER.info("Waiting for app interface to load (first launch may take 30+ seconds)...")
