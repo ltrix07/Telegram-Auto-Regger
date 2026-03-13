@@ -1433,8 +1433,18 @@ class DeviceController:
         # Убираем агрессивные клики, просто даем время клавиатуре и вводим код
         time.sleep(1.0)
         self._input_text(str(code))
-        # УДАЛЕНО: self._adb("shell", "input", "keyevent", "66", check=False)
-        
+
+        time.sleep(0.5)
+        # Явное нажатие кнопки "Далее", так как Telegram X не всегда сабмитит код сам
+        next_btn_resources = ("login_btn", "next_button", "done_button", "ok_button", "floating_button", "fab")
+        if not self.wait_and_tap_resource(next_btn_resources, timeout=4.0, reason="submit code"):
+            if not self.wait_and_tap_by_text(self.NEXT_DONE_TEXT_CANDIDATES, timeout=2.0, reason="submit code"):
+                # Fallback: Координаты круглой кнопки (правый нижний угол)
+                self._tap_percent(0.85, 0.85)
+            self._adb("shell", "input", "keyevent", "66", check=False)  # KEYCODE_ENTER
+
+        self.invalidate_ui_dump_cache()
+
         self.wait_for_ui_state(
             timeout=8.0,
             check_blockers=True,
@@ -1680,6 +1690,11 @@ class DeviceController:
             check=False,
         )
         time.sleep(4)
+
+        # Очищаем экран от окон Terms of Service / Privacy Policy,
+        # которые блокируют UI и не закрываются кнопкой "Назад"
+        LOGGER.info("Clearing potential popups (like Terms of Service) before reading code")
+        self._handle_post_action_popups(rounds=2, include_accept=True)
 
         # Return to chats list.
         for _ in range(3):
