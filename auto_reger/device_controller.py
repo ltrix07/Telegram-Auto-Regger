@@ -973,6 +973,8 @@ class DeviceController:
                     f"(node_text={node_text!r}, content_desc={node_desc!r})"
                 )
                 LOGGER.info("Tapped Telegram proxy enable button by %s", selector)
+                time.sleep(4.0)
+                self.wait_and_tap_by_text(self.START_MESSAGING_TEXT_CANDIDATES, timeout=10.0, reason="start messaging after proxy")
                 return selector
 
             # Some Telegram builds expose button label only via content-desc.
@@ -986,6 +988,8 @@ class DeviceController:
                 self._tap(*center)
                 selector = "content-desc='Connect Proxy'"
                 LOGGER.info("Tapped Telegram proxy enable button by %s", selector)
+                time.sleep(4.0)
+                self.wait_and_tap_by_text(self.START_MESSAGING_TEXT_CANDIDATES, timeout=10.0, reason="start messaging after proxy")
                 return selector
 
             # Compatibility fallback to existing generic helpers.
@@ -994,6 +998,8 @@ class DeviceController:
                     if self._tap_by_resource_id(resource_id):
                         selector = f"resourceId={resource_id}"
                         LOGGER.info("Tapped Telegram proxy enable button by %s", selector)
+                        time.sleep(4.0)
+                        self.wait_and_tap_by_text(self.START_MESSAGING_TEXT_CANDIDATES, timeout=10.0, reason="start messaging after proxy")
                         return selector
                 except Exception:
                     LOGGER.debug(
@@ -1007,6 +1013,8 @@ class DeviceController:
                 if self._tap_by_text_candidates(self.PROXY_ENABLE_TEXT_CANDIDATES):
                     selector = "text-candidates:fallback"
                     LOGGER.info("Tapped Telegram proxy enable button by %s", selector)
+                    time.sleep(4.0)
+                    self.wait_and_tap_by_text(self.START_MESSAGING_TEXT_CANDIDATES, timeout=10.0, reason="start messaging after proxy")
                     return selector
             except Exception:
                 LOGGER.debug("Proxy popup text scan failed on %s", self.device_id, exc_info=True)
@@ -1122,31 +1130,14 @@ class DeviceController:
 
         while time.time() < deadline:
             self.invalidate_ui_dump_cache()
-
-            # Если видим стартовую кнопку - кликаем и ждем анимацию перехода
-            if self.wait_and_tap_by_text(self.START_MESSAGING_TEXT_CANDIDATES, timeout=15.0):
-                LOGGER.info("Tapped 'Start Messaging', waiting for transition...")
-                time.sleep(5.0)
-                self.wait_for_ui_state(text_candidates=["Phone number", "Your Phone"], timeout=10.0)
-                LOGGER.info("Reached phone input screen, ready for proxy.")
-                continue
-
-            # Если видим промежуточные окна разрешений/языка - кликаем
-            if self._tap_by_text_candidates(self.CONTINUE_TEXT_CANDIDATES):
-                time.sleep(1.0)
-                continue
-
-            # Если появились элементы экрана ввода номера - значит мы успешно прошли старт
-            if self.screen_contains_any(("phone", "country", "номер телефона", "code")) or \
-               self.screen_contains_any(self.PHONE_NUMBER_RESOURCE_ID_SUFFIXES):
+            if self.screen_contains_any(self.START_MESSAGING_TEXT_CANDIDATES):
                 app_ready = True
                 break
-
             time.sleep(1.5)
 
         if not app_ready:
             raise RuntimeError(
-                "App load timeout: Telegram UI failed to render within the time limit. Aborting cycle."
+                "App load timeout: Telegram UI failed to render the start screen within the time limit."
             )
         else:
             LOGGER.info("Telegram interface successfully loaded and is ready for proxy setup.")

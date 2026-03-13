@@ -928,6 +928,7 @@ def run_single_cycle(
         }
 
         device.launch_telegram()
+        time.sleep(5.0)
 
         if not device.set_telegram_proxy_via_intent(
             proxy_host,
