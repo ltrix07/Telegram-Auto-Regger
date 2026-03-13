@@ -1236,8 +1236,21 @@ class DeviceController:
         Best-effort fill Telegram phone form and continue.
         """
         LOGGER.info("Inputting phone number on Telegram UI")
-        self._safe_tap_by_text_candidates(self.CONTINUE_TEXT_CANDIDATES, reason="continue")
+        self.wait_and_tap_by_text(self.START_MESSAGING_TEXT_CANDIDATES, timeout=10.0, reason="start messaging")
+        self.wait_and_tap_by_text(self.CONTINUE_TEXT_CANDIDATES, timeout=5.0, reason="continue")
         self._tap_system_allow_button()
+
+        LOGGER.info("Waiting for phone UI to fully render...")
+        ui_ready = self.wait_for_ui_state(
+            resource_suffixes=self.PHONE_NUMBER_RESOURCE_ID_SUFFIXES,
+            text_candidates=("phone", "country", "номер телефона"),
+            timeout=20.0,
+        )
+        if not ui_ready:
+            raise RuntimeError("Telegram UI failed to render phone input fields in time.")
+
+        # Let the UI finish any subtle layout shifts.
+        time.sleep(0.5)
 
         phone_digits = re.sub(r"\D", "", phone_number)
         cc_digits = re.sub(r"\D", "", country_code) if country_code else ""
@@ -1247,8 +1260,9 @@ class DeviceController:
             phone_digits = phone_digits[len(cc_digits):]
 
         if cc_digits:
-            tapped_cc = self._safe_tap_telegram_resources(
+            tapped_cc = self.wait_and_tap_resource(
                 self.PHONE_COUNTRY_CODE_RESOURCE_ID_SUFFIXES,
+                timeout=4.0,
                 reason="country code field",
             )
             if not tapped_cc:
@@ -1261,10 +1275,11 @@ class DeviceController:
                 self._adb("shell", "input", "keyevent", "67", check=False)  # KEYCODE_DEL (Backspace)
 
             self._input_text(cc_digits)
-            time.sleep(0.5)
+            time.sleep(0.3)
 
-        tapped_phone = self._safe_tap_telegram_resources(
+        tapped_phone = self.wait_and_tap_resource(
             self.PHONE_NUMBER_RESOURCE_ID_SUFFIXES,
+            timeout=4.0,
             reason="phone number field",
         )
         if not tapped_phone:
@@ -1278,8 +1293,8 @@ class DeviceController:
         # Добавляем ID круглой кнопки (Floating Action Button), которую используют форки
         next_btn_resources = ("login_btn", "next_button", "done_button", "ok_button", "floating_button", "fab")
 
-        if not self._safe_tap_telegram_resources(next_btn_resources, reason="submit phone number"):
-            if not self._safe_tap_by_text_candidates(self.NEXT_DONE_TEXT_CANDIDATES, reason="submit phone number"):
+        if not self.wait_and_tap_resource(next_btn_resources, timeout=6.0, reason="submit phone number"):
+            if not self.wait_and_tap_by_text(self.NEXT_DONE_TEXT_CANDIDATES, timeout=3.0, reason="submit phone number"):
                 # Fallback: Координаты круглой кнопки "Далее" (правый нижний угол)
                 self._tap_percent(0.85, 0.85)
             self._adb("shell", "input", "keyevent", "66", check=False)  # KEYCODE_ENTER
@@ -1287,22 +1302,21 @@ class DeviceController:
 
         self._safe_tap_by_text_candidates(["yes", "да"], reason="confirm phone number")
 
-        # Ждем загрузки следующего экрана до 15 секунд
-        deadline = time.time() + 15.0
-        while time.time() < deadline:
-            self.invalidate_ui_dump_cache()
-
-            # 1. Проверяем баны ИЛИ отправку кода на чужую почту/в приложение (Скипаем регистрацию)
-            self._raise_for_auth_blockers(step_name="phone submission", include_existing_account=True)
-
-            # 2. Если появилось поле для ввода СМС (Email is not required)
-            # 3. ИЛИ появилось поле для ВВОДА новой почты
-            # -> Значит экран успешно загрузился, прерываем ожидание и идем дальше
-            if self.screen_contains_any(self.CODE_RESOURCE_ID_SUFFIXES) or \
-               self.screen_contains_any(("email_field", "login_email_field", "your email address", "please enter your email")):
-                break
-
-            time.sleep(1.0)
+        LOGGER.info("Waiting for code/email screen after phone submission...")
+        ui_next_ready = self.wait_for_ui_state(
+            resource_suffixes=(
+                *self.CODE_RESOURCE_ID_SUFFIXES,
+                "email_field",
+                "login_email_field",
+            ),
+            text_candidates=("your email address", "please enter your email"),
+            timeout=15.0,
+            check_blockers=True,
+            step_name="phone submission",
+            include_existing_account=True,
+        )
+        if not ui_next_ready:
+            LOGGER.warning("Timeout waiting for code/email screen after phone submission")
 
         self._handle_post_action_popups(rounds=2, include_accept=False)
 
@@ -1311,17 +1325,35 @@ class DeviceController:
         Input verification SMS code in Telegram.
         """
         LOGGER.info("Inputting SMS code on Telegram UI")
+        # Кнопка "получить код по СМС" может быть, а может не быть, не ждем ее долго
         self._safe_tap_by_text_candidates(self.GET_CODE_VIA_SMS_TEXT_CANDIDATES, reason="request code via SMS")
-        code_field_tapped = self._safe_tap_telegram_resources(self.CODE_RESOURCE_ID_SUFFIXES, reason="code field")
-        if not code_field_tapped:
-            code_field_tapped = self._safe_tap_by_text_candidates(self.CODE_TEXT_CANDIDATES, reason="code field")
-        if not code_field_tapped:
-            self._tap_percent(0.5, 0.36)
+
+        # Динамически ждем появления поля кода (и ловим баны/too many attempts)
+        ui_ready = self.wait_for_ui_state(
+            resource_suffixes=self.CODE_RESOURCE_ID_SUFFIXES,
+            text_candidates=self.CODE_TEXT_CANDIDATES,
+            timeout=15.0,
+            check_blockers=True,
+            step_name="code confirmation",
+            include_existing_account=False,
+        )
+        if not ui_ready:
+            raise RuntimeError("Telegram UI failed to render code input fields in time.")
+
+        if not self._safe_tap_telegram_resources(self.CODE_RESOURCE_ID_SUFFIXES, reason="code field"):
+            if not self._safe_tap_by_text_candidates(self.CODE_TEXT_CANDIDATES, reason="code field"):
+                self._tap_percent(0.5, 0.36)
         self._input_text(str(code))
         self._adb("shell", "input", "keyevent", "66", check=False)
-        self.invalidate_ui_dump_cache()
 
-        self._raise_for_auth_blockers(step_name="code confirmation", include_existing_account=False)
+        # Ждем загрузки следующего экрана (профиля, 2FA или возможного бана после ввода)
+        self.wait_for_ui_state(
+            timeout=8.0,
+            check_blockers=True,
+            step_name="post code confirmation",
+            include_existing_account=False,
+        )
+
         self._handle_post_action_popups(rounds=2, include_accept=False)
         self._handle_two_factor_reset_flow()
         self._handle_post_action_popups(rounds=3, include_accept=False)
@@ -1334,21 +1366,36 @@ class DeviceController:
         best-effort matching with a fallback tap.
         """
         LOGGER.info("Inputting email on Telegram UI")
-        known_resource_names = ("email", "login_email_field", "email_field")
-        tapped = self._safe_tap_telegram_resources(known_resource_names, reason="email field")
+        ui_ready = self.wait_for_ui_state(
+            resource_suffixes=("email", "login_email_field", "email_field"),
+            text_candidates=self.EMAIL_FIELD_TEXT_CANDIDATES,
+            timeout=15.0,
+            check_blockers=True,
+            step_name="email submission",
+            include_existing_account=False,
+        )
+        if not ui_ready:
+            raise RuntimeError("Telegram UI failed to render email input field in time.")
+
+        tapped = self.wait_and_tap_resource(
+            ("email", "login_email_field", "email_field"),
+            timeout=5.0,
+            reason="email field",
+        )
         if not tapped:
-            if not self._safe_tap_by_text_candidates(self.EMAIL_FIELD_TEXT_CANDIDATES, reason="email field"):
+            if not self.wait_and_tap_by_text(self.EMAIL_FIELD_TEXT_CANDIDATES, timeout=3.0, reason="email field"):
                 # TODO: calibrate tap coordinates for email field if needed.
                 self._tap_percent(0.5, 0.42)
+
         self._input_text(email)
-        if not self._safe_tap_telegram_resources(
+        if not self.wait_and_tap_resource(
             ("login_btn", "next_button", "done_button", "ok_button"),
+            timeout=6.0,
             reason="submit email",
         ):
-            self._safe_tap_by_text_candidates(self.NEXT_DONE_TEXT_CANDIDATES, reason="submit email")
+            self.wait_and_tap_by_text(self.NEXT_DONE_TEXT_CANDIDATES, timeout=3.0, reason="submit email")
             self._adb("shell", "input", "keyevent", "66", check=False)
 
-        self._raise_for_auth_blockers(step_name="email submission", include_existing_account=False)
         self._handle_post_action_popups(rounds=2, include_accept=False)
 
     def fill_profile(self, first_name: str, last_name: str) -> None:
@@ -1356,28 +1403,42 @@ class DeviceController:
         Fill first/last name step in Telegram profile setup.
         """
         LOGGER.info("Filling Telegram profile name fields")
+        # Ждем появления поля имени (и ловим возможные баны)
+        ui_ready = self.wait_for_ui_state(
+            resource_suffixes=self.FIRST_NAME_RESOURCE_ID_SUFFIXES,
+            timeout=15.0,
+            check_blockers=True,
+            step_name="profile setup",
+            include_existing_account=False,
+        )
+        if not ui_ready:
+            LOGGER.warning("Profile UI didn't fully render, proceeding with fallback logic.")
+
         if self._safe_tap_telegram_resources(self.FIRST_NAME_RESOURCE_ID_SUFFIXES, reason="first name field"):
             self._input_text(first_name)
         else:
-            # TODO: calibrate first-name field coordinates for your UI build.
             self._tap_percent(0.5, 0.26)
             self._input_text(first_name)
 
         if self._safe_tap_telegram_resources(self.LAST_NAME_RESOURCE_ID_SUFFIXES, reason="last name field"):
             self._input_text(last_name)
         else:
-            # TODO: calibrate last-name field coordinates for your UI build.
             self._tap_percent(0.5, 0.36)
             self._input_text(last_name)
 
         submit_resources = ("login_btn", "done_button", "next_button", "ok_button", "floating_button", "fab")
         if not self._safe_tap_telegram_resources(submit_resources, reason="submit profile name"):
             if not self._safe_tap_by_text_candidates(self.PROFILE_FINISH_TEXT_CANDIDATES, reason="submit profile name"):
-                # Fallback: координата круглой кнопки (FAB) в правом нижнем углу
                 self._tap_percent(0.85, 0.85)
-
-            # Дополнительно эмулируем нажатие клавиши Enter (KEYCODE_ENTER)
             self._adb("shell", "input", "keyevent", "66", check=False)
+
+        # Ждем загрузки интерфейса чатов после регистрации
+        self.wait_for_ui_state(
+            timeout=10.0,
+            check_blockers=True,
+            step_name="post profile setup",
+            include_existing_account=False,
+        )
 
         self._handle_post_action_popups(rounds=2, include_accept=True)
         self._safe_tap_by_text_candidates(self.ACCEPT_TEXT_CANDIDATES, reason="accept terms popup")
@@ -1385,7 +1446,6 @@ class DeviceController:
         self._tap_system_allow_button()
         self._tap_system_allow_button()
         self._handle_post_action_popups(rounds=2, include_accept=False)
-        self._raise_for_auth_blockers(step_name="profile setup", include_existing_account=False)
 
     def _safe_tap_by_text_candidates(self, candidates: Iterable[str], reason: str = "") -> bool:
         self.invalidate_ui_dump_cache()
@@ -1694,6 +1754,88 @@ class DeviceController:
         """
         self._ui_xml_cache = None
         self._ui_root_cache = None
+
+    def wait_for_ui_state(
+        self,
+        text_candidates: Iterable[str] = (),
+        resource_suffixes: Iterable[str] = (),
+        timeout: float = 15.0,
+        poll_interval: float = 0.5,
+        require_all: bool = False,
+        check_blockers: bool = False,
+        step_name: str = "ui_wait",
+        include_existing_account: bool = False,
+    ) -> bool:
+        """
+        Dynamically wait for specific texts or resource IDs to appear on screen.
+        Returns True if the condition is met within the timeout, False otherwise.
+        """
+        deadline = time.time() + float(timeout)
+        normalized_texts = [str(item).strip().lower() for item in text_candidates if str(item).strip()]
+        normalized_suffixes = [str(item).strip() for item in resource_suffixes if str(item).strip()]
+
+        while time.time() < deadline:
+            self.invalidate_ui_dump_cache()
+
+            if check_blockers:
+                self._raise_for_auth_blockers(
+                    step_name=step_name,
+                    include_existing_account=include_existing_account,
+                )
+
+            found_text = False
+            found_resource = False
+
+            xml_text = self._get_cached_ui_xml()
+
+            if normalized_texts:
+                text_candidates_joined = " | ".join(self._extract_text_candidates(xml_text)).lower()
+                found_text = any(item in text_candidates_joined for item in normalized_texts)
+
+            if normalized_suffixes:
+                for suffix in normalized_suffixes:
+                    if suffix in xml_text:
+                        found_resource = True
+                        break
+                if not found_resource:
+                    for suffix in normalized_suffixes:
+                        for resource_id in self._telegram_resource_id_candidates(suffix):
+                            if resource_id in xml_text:
+                                found_resource = True
+                                break
+                        if found_resource:
+                            break
+
+            if require_all:
+                if (not normalized_texts or found_text) and (not normalized_suffixes or found_resource):
+                    return True
+            else:
+                if found_text or found_resource:
+                    return True
+
+            time.sleep(float(poll_interval))
+
+        return False
+
+    def wait_and_tap_by_text(self, candidates: Iterable[str], timeout: float = 10.0, reason: str = "") -> bool:
+        """Wait for an element to appear by text and then tap it."""
+        deadline = time.time() + float(timeout)
+        while time.time() < deadline:
+            if self._safe_tap_by_text_candidates(candidates, reason=reason):
+                return True
+            time.sleep(0.5)
+        LOGGER.warning("Timeout waiting to tap text for: %s", reason)
+        return False
+
+    def wait_and_tap_resource(self, resource_names: Iterable[str], timeout: float = 10.0, reason: str = "") -> bool:
+        """Wait for an element to appear by resource id and then tap it."""
+        deadline = time.time() + float(timeout)
+        while time.time() < deadline:
+            if self._safe_tap_telegram_resources(resource_names, reason=reason):
+                return True
+            time.sleep(0.5)
+        LOGGER.warning("Timeout waiting to tap resource for: %s", reason)
+        return False
 
     def _dump_ui_xml(self) -> str:
         self._adb("shell", "uiautomator", "dump", self.UI_DUMP_PATH, check=False)
