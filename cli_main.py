@@ -888,7 +888,6 @@ def run_single_cycle(
         if not device.is_ready():
             raise RuntimeError(f"Device {device_id} is not ready for registration.")
         device.hide_root()
-        record_proc = device.start_recording(remote_video_path)
 
         country = str(CONFIG.get("registration", {}).get("default_country", "US")).strip() or "US"
         proxy_data = proxy_api.get_proxy(country_code=country)
@@ -971,6 +970,10 @@ def run_single_cycle(
             raise RuntimeError("SMS code not received from provider.")
 
         _check_shutdown(stop_event)
+
+        # Начинаем запись только после получения кода, чтобы уложиться в 3 минуты
+        LOGGER.info("Starting screenrecord after receiving SMS code")
+        record_proc = device.start_recording(remote_video_path)
 
         device.input_code(sms_code)
         maybe_fill_profile_step(device=device, last_names=last_names)
