@@ -1048,40 +1048,41 @@ class DeviceController:
 
     def launch_telegram(self) -> None:
         """
-        Launch official Telegram or fork app via generic monkey command
+        Launch official Telegram or fork app via am start command
         and dynamically wait for the UI to fully render and pass the start screen.
         """
         LOGGER.info("Launching Telegram on %s", self.device_id)
         self.invalidate_ui_dump_cache()
 
-        time.sleep(10.0)  # APK post-install processes on Android can max out a single core CPU
-        for attempt in range(1, 16):
-            result = self._adb(
-                "shell",
-                "monkey",
-                "-p",
-                self.telegram_package,
-                "-c",
-                "android.intent.category.LAUNCHER",
-                "1",
-                check=False,
-            )
-            output = f"{result.stdout}\n{result.stderr}"
-            if "Events injected: 1" in output:
-                LOGGER.info("Successfully launched Telegram via monkey (attempt %d)", attempt)
-                break
-            else:
-                LOGGER.warning(
-                    "Monkey launch attempt %d failed for %s. Server might be overloaded due to 1 CPU limit. Retrying... Output: %s",
-                    attempt,
-                    self.telegram_package,
-                    output.strip(),
-                )
-                time.sleep(10.0)
-        else:
-            raise RuntimeError(f"Failed to launch Telegram via monkey after 15 attempts on {self.device_id}. Check CPU load.")
+        # Give the system a moment to settle after potential APK installation.
+        time.sleep(5.0)
 
-        time.sleep(4.0)
+        # Determine the correct main activity for the detected package.
+        # This is needed because `am start` is explicit, unlike the original `monkey` command.
+        activity_suffix = ".ui.LaunchActivity"  # Default for official client and most forks
+        if self.telegram_package == "org.thunderdog.challegram":
+            activity_suffix = ".MainActivity"  # For Telegram X, as per user's context
+
+        component_name = f"{self.telegram_package}/{activity_suffix.lstrip('.')}"
+        launched = False
+
+        for attempt in range(1, 11):
+            LOGGER.info("Attempting to launch Telegram via am start (attempt %d/10): %s", attempt, component_name)
+            self._adb("shell", "am", "start", "-n", component_name, check=False)
+
+            # Give a moment for the process to start before checking for its PID.
+            time.sleep(1.0)
+            pid_result = self._adb("shell", "pidof", self.telegram_package, check=False)
+            if pid_result.stdout and pid_result.stdout.strip():
+                LOGGER.info("Successfully launched %s, process found with PID: %s", self.telegram_package, pid_result.stdout.strip())
+                launched = True
+                break
+
+            LOGGER.warning("Process for %s not found after 'am start'. Retrying in 5 seconds...", self.telegram_package)
+            time.sleep(5.0)
+
+        if not launched:
+            raise RuntimeError(f"Failed to launch Telegram and confirm process start after 10 attempts on {self.device_id}.")
 
         LOGGER.info("Waiting for app interface to load (first launch may take 60+ seconds)...")
         deadline = time.time() + 60.0
