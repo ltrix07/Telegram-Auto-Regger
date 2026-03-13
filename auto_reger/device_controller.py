@@ -1322,21 +1322,24 @@ class DeviceController:
             self._input_text(first_name)
         else:
             # TODO: calibrate first-name field coordinates for your UI build.
-            self._tap_percent(0.5, 0.32)
+            self._tap_percent(0.5, 0.26)
             self._input_text(first_name)
 
         if self._safe_tap_telegram_resources(self.LAST_NAME_RESOURCE_ID_SUFFIXES, reason="last name field"):
             self._input_text(last_name)
         else:
             # TODO: calibrate last-name field coordinates for your UI build.
-            self._tap_percent(0.5, 0.40)
+            self._tap_percent(0.5, 0.36)
             self._input_text(last_name)
 
-        if not self._safe_tap_telegram_resources(
-            ("login_btn", "done_button", "next_button", "ok_button"),
-            reason="submit profile name",
-        ):
-            self._safe_tap_by_text_candidates(self.PROFILE_FINISH_TEXT_CANDIDATES, reason="submit profile name")
+        submit_resources = ("login_btn", "done_button", "next_button", "ok_button", "floating_button", "fab")
+        if not self._safe_tap_telegram_resources(submit_resources, reason="submit profile name"):
+            if not self._safe_tap_by_text_candidates(self.PROFILE_FINISH_TEXT_CANDIDATES, reason="submit profile name"):
+                # Fallback: координата круглой кнопки (FAB) в правом нижнем углу
+                self._tap_percent(0.85, 0.85)
+
+            # Дополнительно эмулируем нажатие клавиши Enter (KEYCODE_ENTER)
+            self._adb("shell", "input", "keyevent", "66", check=False)
 
         self._handle_post_action_popups(rounds=2, include_accept=True)
         self._safe_tap_by_text_candidates(self.ACCEPT_TEXT_CANDIDATES, reason="accept terms popup")
