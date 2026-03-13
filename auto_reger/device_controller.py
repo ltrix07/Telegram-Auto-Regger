@@ -907,7 +907,7 @@ class DeviceController:
         )
         return True
 
-    def enable_telegram_proxy_popup(self, timeout: float = 15.0, poll_interval: float = 0.4) -> str:
+    def enable_telegram_proxy_popup(self, timeout: float = 25.0, poll_interval: float = 1.5) -> str:
         """
         Wait for Telegram proxy confirmation popup and tap its positive action.
 
@@ -1064,6 +1064,7 @@ class DeviceController:
             "1",
             check=False,
         )
+        time.sleep(4.0)
 
         LOGGER.info("Waiting for app interface to load (first launch may take 30+ seconds)...")
         # Увеличиваем таймаут до 45 секунд для свежих контейнеров
@@ -1093,7 +1094,9 @@ class DeviceController:
             time.sleep(1.5)
 
         if not app_ready:
-            LOGGER.warning("App load timeout: Telegram UI might still be loading or stuck.")
+            raise RuntimeError(
+                "App load timeout: Telegram UI failed to render within the time limit. Aborting cycle."
+            )
         else:
             LOGGER.info("Telegram interface successfully loaded and is ready for proxy setup.")
 
@@ -1760,7 +1763,7 @@ class DeviceController:
         text_candidates: Iterable[str] = (),
         resource_suffixes: Iterable[str] = (),
         timeout: float = 15.0,
-        poll_interval: float = 0.5,
+        poll_interval: float = 1.5,
         require_all: bool = False,
         check_blockers: bool = False,
         step_name: str = "ui_wait",
