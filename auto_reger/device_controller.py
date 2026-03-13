@@ -1049,13 +1049,11 @@ class DeviceController:
     def launch_telegram(self) -> None:
         """
         Launch official Telegram or fork app via generic monkey command
-        and dynamically wait for the UI to fully render.
+        and dynamically wait for the UI to fully render and pass the start screen.
         """
         LOGGER.info("Launching Telegram on %s", self.device_id)
-        # Очищаем кеш UI перед запуском
         self.invalidate_ui_dump_cache()
 
-        # Запускаем через monkey
         self._adb(
             "shell",
             "monkey",
@@ -1067,26 +1065,37 @@ class DeviceController:
             check=False,
         )
 
-        LOGGER.info("Waiting for app interface to load...")
-        deadline = time.time() + 15.0
-        app_loaded = False
+        LOGGER.info("Waiting for app interface to load (first launch may take 30+ seconds)...")
+        # Увеличиваем таймаут до 45 секунд для свежих контейнеров
+        deadline = time.time() + 45.0
+        app_ready = False
 
-        # Динамическое ожидание появления стартового экрана или экрана ввода номера
         while time.time() < deadline:
-            if self._screen_contains_candidates(self.START_MESSAGING_TEXT_CANDIDATES) or \
-               self._screen_contains_candidates(self.CONTINUE_TEXT_CANDIDATES) or \
-               self._screen_contains_candidates(self.PHONE_NUMBER_RESOURCE_ID_SUFFIXES):
-                app_loaded = True
-                break
-            time.sleep(1.0)
+            self.invalidate_ui_dump_cache()
 
-        if not app_loaded:
+            # Если видим стартовую кнопку - кликаем и ждем анимацию перехода
+            if self._tap_by_text_candidates(self.START_MESSAGING_TEXT_CANDIDATES):
+                LOGGER.info("Tapped 'Start Messaging', waiting for transition...")
+                time.sleep(2.0)
+                continue
+
+            # Если видим промежуточные окна разрешений/языка - кликаем
+            if self._tap_by_text_candidates(self.CONTINUE_TEXT_CANDIDATES):
+                time.sleep(1.0)
+                continue
+
+            # Если появились элементы экрана ввода номера - значит мы успешно прошли старт
+            if self.screen_contains_any(("phone", "country", "номер телефона", "code")) or \
+               self.screen_contains_any(self.PHONE_NUMBER_RESOURCE_ID_SUFFIXES):
+                app_ready = True
+                break
+
+            time.sleep(1.5)
+
+        if not app_ready:
             LOGGER.warning("App load timeout: Telegram UI might still be loading or stuck.")
         else:
-            LOGGER.info("Telegram interface successfully loaded.")
-
-        if self._tap_by_text_candidates(self.START_MESSAGING_TEXT_CANDIDATES):
-            time.sleep(0.5)
+            LOGGER.info("Telegram interface successfully loaded and is ready for proxy setup.")
 
     def open_telegram(self, package_name: Optional[str] = None) -> None:
         """
@@ -1227,7 +1236,6 @@ class DeviceController:
         Best-effort fill Telegram phone form and continue.
         """
         LOGGER.info("Inputting phone number on Telegram UI")
-        self._safe_tap_by_text_candidates(self.START_MESSAGING_TEXT_CANDIDATES, reason="start messaging")
         self._safe_tap_by_text_candidates(self.CONTINUE_TEXT_CANDIDATES, reason="continue")
         self._tap_system_allow_button()
 
