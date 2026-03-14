@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+import base64
 import logging
 import re
 import time
@@ -85,59 +84,72 @@ class TelegramRegistrator:
         proxy_ip: Optional[str] = None,
         proxy_port: Optional[str] = None,
     ) -> Dict[str, str]:
-        normalized_code = self._normalize_country_code(country_code)
-        self.device_controller.airplane_mode_toggle()
+        self.device_controller.start_recording_screen()
+        error_occurred = False
+        try:
+            normalized_code = self._normalize_country_code(country_code)
+            self.device_controller.airplane_mode_toggle()
 
-        proxy_host = str(proxy_ip or "").strip()
-        proxy_port_value = str(proxy_port or "").strip()
-        if proxy_host and proxy_port_value and hasattr(self.device_controller, "set_telegram_proxy_via_intent"):
-            intent_applied = self.device_controller.set_telegram_proxy_via_intent(proxy_host, proxy_port_value)
-            if intent_applied:
-                try:
-                    self._wait_and_enable_proxy_popup(timeout=self.PROXY_ENABLE_TIMEOUT_SECONDS)
-                except TimeoutError:
+            proxy_host = str(proxy_ip or "").strip()
+            proxy_port_value = str(proxy_port or "").strip()
+            if proxy_host and proxy_port_value and hasattr(self.device_controller, "set_telegram_proxy_via_intent"):
+                intent_applied = self.device_controller.set_telegram_proxy_via_intent(proxy_host, proxy_port_value)
+                if intent_applied:
+                    try:
+                        self._wait_and_enable_proxy_popup(timeout=self.PROXY_ENABLE_TIMEOUT_SECONDS)
+                    except TimeoutError:
+                        LOGGER.warning(
+                            "Telegram proxy popup was not detected on time; continuing registration flow."
+                        )
+                else:
                     LOGGER.warning(
-                        "Telegram proxy popup was not detected on time; continuing registration flow."
+                        "Failed to trigger Telegram proxy intent for %s:%s; continuing registration flow.",
+                        proxy_host,
+                        proxy_port_value,
                     )
-            else:
-                LOGGER.warning(
-                    "Failed to trigger Telegram proxy intent for %s:%s; continuing registration flow.",
-                    proxy_host,
-                    proxy_port_value,
-                )
 
-        activation_id, full_phone_number = self._request_number(normalized_code)
-        national_number = self._extract_local_number(full_phone_number, normalized_code)
+            activation_id, full_phone_number = self._request_number(normalized_code)
+            national_number = self._extract_local_number(full_phone_number, normalized_code)
 
-        self.device_controller.cleanup_telegram()
-        self.device_controller.open_telegram()
-        self._ensure_telegram_opened()
+            self.device_controller.cleanup_telegram()
+            self.device_controller.open_telegram()
+            self._ensure_telegram_opened()
 
-        self._click_any(self.START_BUTTON_SELECTORS, "Start Messaging button")
+            self._click_any(self.START_BUTTON_SELECTORS, "Start Messaging button")
 
-        self._fill_text(self.PHONE_CODE_SELECTOR, normalized_code, "country code input")
-        self._click(self.PHONE_NUMBER_SELECTOR, "phone number input")
-        self._fill_text(self.PHONE_NUMBER_SELECTOR, national_number, "phone number input")
+            self._fill_text(self.PHONE_CODE_SELECTOR, normalized_code, "country code input")
+            self._click(self.PHONE_NUMBER_SELECTOR, "phone number input")
+            self._fill_text(self.PHONE_NUMBER_SELECTOR, national_number, "phone number input")
 
-        self._click_any(self.NEXT_BUTTON_SELECTORS, "Next/Done button")
+            self._click_any(self.NEXT_BUTTON_SELECTORS, "Next/Done button")
 
-        sms_code = self._wait_for_sms_code(activation_id=activation_id)
-        self._fill_text(self.CODE_SELECTOR, sms_code, "SMS code input")
+            sms_code = self._wait_for_sms_code(activation_id=activation_id)
+            self._fill_text(self.CODE_SELECTOR, sms_code, "SMS code input")
 
-        first_name, last_name = self._generate_names(names_generator)
-        self._fill_text(self.FIRST_NAME_SELECTOR, first_name, "first name field")
-        self._fill_text(self.LAST_NAME_SELECTOR, last_name, "last name field")
+            first_name, last_name = self._generate_names(names_generator)
+            self._fill_text(self.FIRST_NAME_SELECTOR, first_name, "first name field")
+            self._fill_text(self.LAST_NAME_SELECTOR, last_name, "last name field")
 
-        self._try_click_any(self.TERMS_SELECTORS, timeout=2.0)
+            self._try_click_any(self.TERMS_SELECTORS, timeout=2.0)
 
-        return {
-            "activation_id": activation_id or "",
-            "phone_number": full_phone_number,
-            "country_code": normalized_code,
-            "sms_code": sms_code,
-            "first_name": first_name,
-            "last_name": last_name,
-        }
+            return {
+                "activation_id": activation_id or "",
+                "phone_number": full_phone_number,
+                "country_code": normalized_code,
+                "sms_code": sms_code,
+                "first_name": first_name,
+                "last_name": last_name,
+            }
+        except Exception:
+            error_occurred = True
+            raise
+        finally:
+            video_data = self.device_controller.stop_recording_screen()
+            if video_data:
+                file_name = "part2_crash_debug.mp4" if error_occurred else "part2_success.mp4"
+                with open(file_name, "wb") as f:
+                    f.write(base64.b64decode(video_data))
+                LOGGER.info(f"Screen recording saved to {file_name}")
 
     def _ensure_telegram_opened(self) -> None:
         expected_package = (
