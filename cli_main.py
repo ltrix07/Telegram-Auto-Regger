@@ -22,6 +22,8 @@ from auto_reger.email_api import EmailApi, EmailAuthorizationError, NoEmailsLeft
 from auto_reger.notifier import TelegramNotifier
 from auto_reger.proxy_api import ProxyApi
 from auto_reger.session_generator import SessionGenerator
+from auto_reger.registration import TelegramRegistrator
+from auto_reger.registration_with_video import TelegramRegistratorWithVideo
 from auto_reger.sms_api import (
     SmsApi,
     can_set_status_8,
@@ -133,6 +135,11 @@ def parse_args() -> argparse.Namespace:
         "--root",
         action="store_true",
         help="Enable root access requirement for ADB commands.",
+    )
+    parser.add_argument(
+        "--video",
+        action="store_true",
+        help="Enable two-part video recording of the registration process.",
     )
     return parser.parse_args()
 
@@ -1131,6 +1138,161 @@ def run_single_cycle(
     )
 
 
+def run_single_cycle_with_video(
+    cycle_index: int,
+    total_cycles: int,
+    *,
+    stop_event: threading.Event,
+    device_pool: DevicePool,
+    proxy_api: ProxyApi,
+    sms_api: SmsApi,
+    last_names: list[str],
+    notifier: Optional[TelegramNotifier],
+    require_root: bool,
+) -> CycleResult:
+    device_id = ""
+    device: Optional[DeviceController] = None
+    docker_controller: Optional[DockerAndroidController] = None
+    session_generator: Optional[SessionGenerator] = None
+    activation_id = ""
+    phone_number = ""
+    cycle_success = False
+    video_part1_path: Optional[str] = None
+    video_part2_path: Optional[str] = None
+
+    try:
+        device_id = device_pool.acquire(stop_event=stop_event)
+        LOGGER.info("Cycle %s/%s with VIDEO started on device %s", cycle_index, total_cycles, device_id)
+        _check_shutdown(stop_event)
+
+        docker_controller, boot_timeout = build_docker_controller_from_config()
+        docker_controller.stop_container()
+        docker_controller.start_container()
+        docker_controller.wait_for_boot(device_udid=device_id, timeout=boot_timeout)
+        try:
+            docker_controller.install_apk(device_id)
+        except Exception:
+            LOGGER.critical(
+                "Cycle %s/%s failed: Telegram APK installation failed on %s. Aborting cycle.",
+                cycle_index,
+                total_cycles,
+                device_id,
+                exc_info=True,
+            )
+            return CycleResult(index=cycle_index, success=False, device_id=device_id, phone_number="")
+
+        device = DeviceController(device_id=device_id, require_root=require_root)
+        device.connect()
+        if not device.is_ready():
+            raise RuntimeError(f"Device {device_id} is not ready for registration.")
+        device.hide_root()
+        
+        country = str(CONFIG.get("registration", {}).get("default_country", "US")).strip() or "US"
+        proxy_data = proxy_api.get_proxy(country_code=country)
+        if not proxy_data:
+            raise RuntimeError(f"Proxy is required but none returned for country={country}.")
+
+        proxy_host = str(proxy_data.get("ip", "")).strip()
+        proxy_port = str(proxy_data.get("port", "")).strip()
+        proxy_user = str(proxy_data.get("user", "")).strip()
+        proxy_password = str(proxy_data.get("pass", "")).strip()
+        proxy_type = str(proxy_data.get("type", "")).strip().lower()
+        if proxy_type != "socks5":
+            raise RuntimeError(f"Proxy must be SOCKS5. Got type={proxy_type!r}")
+
+        proxy_dict: Dict[str, Any] = {
+            "type": "socks5", "host": proxy_host, "port": int(proxy_port),
+            "username": proxy_user, "password": proxy_password,
+        }
+
+        # Инициализируем новый регистратор
+        video_registrator = TelegramRegistratorWithVideo(
+            device_controller=device,
+            sms_api=sms_api,
+            video_output_dir=resolve_project_path("videos")
+        )
+        
+        # Запускаем весь процесс через один метод
+        reg_result = video_registrator.register_account_with_video(
+            country_code=country,
+            names_generator=lambda: {"first_name": f"user{random.randint(1000, 9999)}", "last_name": random.choice(last_names)},
+            proxy_ip=proxy_host,
+            proxy_port=proxy_port,
+        )
+        
+        phone_number = reg_result["phone_number"]
+        activation_id = reg_result["activation_id"]
+        video_part1_path = reg_result.get("video_part1")
+        video_part2_path = reg_result.get("video_part2")
+
+        register_active_activation(activation_id, phone_number, device_id)
+        
+        device.restore_root()
+
+        LOGGER.info("Starting Telethon post-registration login for %s", phone_number)
+        device_fingerprint = device.get_device_fingerprint()
+
+        session_generator = build_session_generator(device_fingerprint=device_fingerprint)
+        session_path = session_generator.generate_session(
+            phone_number=phone_number,
+            device_controller=device,
+            proxy_dict=proxy_dict,
+            telethon_code=reg_result.get("telethon_code")
+        )
+        LOGGER.info("Telethon session saved for %s at %s", phone_number, session_path)
+
+        safe_set_activation_done(sms_api=sms_api, activation_id=activation_id)
+        remove_activation_from_json(activation_id)
+        unregister_active_activation(activation_id)
+        activation_id = ""
+
+        LOGGER.info("Cycle %s/%s completed on device %s", cycle_index, total_cycles, device_id)
+        cycle_success = True
+    except ShutdownRequested:
+        LOGGER.info("Cycle %s interrupted by shutdown", cycle_index)
+    except Exception as exc:
+        # Для ошибок видео будет то, которое успело записаться
+        video_path = video_part2_path or video_part1_path
+        screenshot_path: Optional[str] = None
+        screenshot_failed = False
+        try:
+            if device:
+                path = _build_debug_screenshot_path(device.device_id, reason=f"cycle_{cycle_index}_alert")
+                if device.take_screenshot(str(path)):
+                    screenshot_path = str(path)
+                else:
+                    screenshot_failed = True
+        except Exception:
+            screenshot_failed = True
+            LOGGER.exception("Failed to capture cycle error screenshot on %s", device_id or "unknown")
+
+        LOGGER.exception(
+            "Cycle %s/%s failed with error on device %s",
+            cycle_index, total_cycles, device_id or "unknown"
+        )
+        maybe_send_cycle_error_alert(
+            notifier=notifier, cycle_index=cycle_index, total_cycles=total_cycles,
+            device_id=device_id, device=device, exc=exc, error_trace=traceback.format_exc(),
+            video_path=video_path, screenshot_path=screenshot_path, screenshot_failed=screenshot_failed,
+        )
+    finally:
+        if activation_id:
+            cancel_activation_safe(sms_api, activation_id, force=stop_event.is_set())
+        
+        try:
+            controller = docker_controller or build_docker_controller_from_config()[0]
+            controller.stop_container()
+        except Exception:
+            LOGGER.exception("Failed to stop Docker container in finally for cycle %s", cycle_index)
+        
+        if device_id:
+            device_pool.release(device_id)
+
+    return CycleResult(
+        index=cycle_index, success=cycle_success, device_id=device_id or "unknown", phone_number=phone_number
+    )
+
+
 def install_signal_handlers(stop_event: threading.Event) -> None:
     def _handler(signum, _frame) -> None:
         if stop_event.is_set():
@@ -1167,6 +1329,7 @@ def run(notifier: Optional[TelegramNotifier] = None) -> int:
     setup_logging()
     runtime_notifier = notifier or build_telegram_notifier()
     require_root = args.root
+    use_video_cycle = args.video
 
     if args.count < 1:
         raise ValueError("--count must be >= 1")
@@ -1189,6 +1352,8 @@ def run(notifier: Optional[TelegramNotifier] = None) -> int:
         getattr(shared_sms_api, "service_name", "unknown"),
     )
     LOGGER.info("Loaded %s devices", len(devices))
+    if use_video_cycle:
+        LOGGER.info("Video recording mode is ENABLED.")
 
     device_pool = DevicePool(devices)
     last_names = load_profile_names()
@@ -1215,9 +1380,12 @@ def run(notifier: Optional[TelegramNotifier] = None) -> int:
                 and not STOP_EVENT.is_set()
             ):
                 attempt_count += 1
+                
+                target_cycle_func = run_single_cycle_with_video if use_video_cycle else run_single_cycle
+                
                 pending.add(
                     executor.submit(
-                        run_single_cycle,
+                        target_cycle_func,
                         attempt_count,
                         max_attempts,
                         stop_event=STOP_EVENT,
@@ -1264,6 +1432,7 @@ def run(notifier: Optional[TelegramNotifier] = None) -> int:
 
     LOGGER.info("Flow finished. Success: %s/%s", success_count, args.count)
     return 0 if success_count == args.count else 1
+
 
 
 if __name__ == "__main__":
