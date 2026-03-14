@@ -1,11 +1,31 @@
+version: '3.8'
+
 services:
+  # --- 1. Шлюз для проксификации (tun2socks) ---
+  tun2socks_1:
+    image: xjasonlyu/tun2socks:v2.5.1
+    container_name: android_proxy_gateway_1
+    command: --loglevel info --proxy socks5://LOGIN:PASSWORD@IP:PORT --device tun0
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      # Порт ADB теперь пробрасывается наружу через этот шлюз
+      - "5555:5555"
+
+  # --- 2. Сам эмулятор Android ---
   android_1:
     image: redroid/redroid:11.0.0-latest
     container_name: android_1
     privileged: true
     shm_size: '2gb'
-    ports:
-      - "5555:5555"
+    depends_on:
+      - tun2socks_1
+    # МАГИЯ: Заставляем Android использовать сетевую карту шлюза tun2socks
+    network_mode: "service:tun2socks_1"
+    
     command:
       - androidboot.redroid_width=720
       - androidboot.redroid_height=1280
@@ -35,3 +55,17 @@ services:
       - ro.hardware.vulkan=adreno
       - redroid.prop.ro.secure=0
       - redroid.prop.ro.debuggable=1
+
+      # --- Динамические настройки Гео и Локали ---
+      - ro.product.locale=${SYS_LOCALE:-en-US}
+      - persist.sys.timezone=${SYS_TIMEZONE:-America/New_York}
+      - TZ=${SYS_TIMEZONE:-America/New_York}
+
+      # --- Жесткий спуфинг SIM-карты (TelephonyManager) ---
+      - gsm.sim.state=5  # 5 = SIM_STATE_READY (Симка вставлена и работает)
+      - gsm.sim.operator.numeric=${SIM_NUMERIC:-310260} # MCC+MNC (Код страны + Код оператора)
+      - gsm.sim.operator.alpha=${SIM_ALPHA:-T-Mobile}   # Имя оператора
+      - gsm.sim.operator.iso-country=${SIM_ISO:-us}     # Код страны ISO
+      - gsm.operator.numeric=${SIM_NUMERIC:-310260}     
+      - gsm.operator.alpha=${SIM_ALPHA:-T-Mobile}       
+      - gsm.operator.iso-country=${SIM_ISO:-us}

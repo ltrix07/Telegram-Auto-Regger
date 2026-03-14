@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import shlex
 import subprocess
 import time
@@ -24,6 +25,7 @@ class DockerAndroidController:
         compose_file: Optional[str] = None,
         compose_project: Optional[str] = None,
         poll_interval_seconds: float = 1.5,
+        country_code: Optional[str] = None,
     ) -> None:
         docker_cfg = CONFIG.get("docker", {})
         adb_cfg = CONFIG.get("adb", {})
@@ -51,6 +53,7 @@ class DockerAndroidController:
 
         self.adb_path = str(adb_path or adb_cfg.get("adb_path", "adb")).strip() or "adb"
         self.poll_interval_seconds = max(float(poll_interval_seconds), 0.2)
+        self.country_code = str(country_code).strip().upper() if country_code else None
 
     def _compose_base_command(self) -> list[str]:
         command = list(self.compose_command)
@@ -60,15 +63,23 @@ class DockerAndroidController:
             command.extend(["-f", self.compose_file])
         return command
 
-    def _run_compose(self, args: list[str], *, action: str) -> subprocess.CompletedProcess[str]:
+    def _run_compose(
+        self, args: list[str], *, action: str, env: Optional[dict[str, str]] = None
+    ) -> subprocess.CompletedProcess[str]:
         command = [*self._compose_base_command(), *args]
         LOGGER.info("Docker action `%s`: %s", action, " ".join(command))
+
+        process_env = os.environ.copy()
+        if env:
+            process_env.update(env)
+
         result = subprocess.run(
             command,
             capture_output=True,
             text=True,
             check=False,
             cwd=str(self.workdir),
+            env=process_env,
         )
         if result.stdout.strip():
             LOGGER.debug("Docker `%s` stdout: %s", action, result.stdout.strip())
@@ -84,7 +95,14 @@ class DockerAndroidController:
 
     def start_container(self) -> None:
         """Starts Android container stack using docker-compose up -d."""
-        self._run_compose(["up", "-d"], action="start_container")
+        env = None
+        if self.country_code:
+            from .sim_spoofing import get_sim_env_for_country
+
+            LOGGER.info("Applying SIM spoofing for country: %s", self.country_code)
+            env = get_sim_env_for_country(self.country_code)
+
+        self._run_compose(["up", "-d"], action="start_container", env=env)
 
     def stop_container(self) -> None:
         """Stops and destroys Android container stack, including volumes."""

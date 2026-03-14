@@ -499,14 +499,10 @@ def convert_dat_to_session(
     *,
     dat_dir: str | Path | None = None,
     output_root: str | Path | None = None,
+    device_info: Optional[Dict[str, str]] = None,  # <--- Добавили параметр
 ) -> bool:
     """
     Convert Android `tgnet.dat` + `userconfing.xml` to a Telethon `.session`.
-
-    Strict rules:
-      - auth_key is accepted only if it is exactly 256 bytes
-      - auth_key bytes are written as-is (no byte-order changes, no trimming/padding)
-      - dc_id must be explicit and supported
     """
     try:
         source_dir = Path(dat_dir) if dat_dir is not None else PROJECT_ROOT / "sessions" / "dat"
@@ -528,6 +524,7 @@ def convert_dat_to_session(
             dc_id=auth_bundle.dc_id,
         )
 
+        # Собираем метаданные
         metadata = {
             "source": auth_bundle.source,
             "dc_id": auth_bundle.dc_id,
@@ -538,6 +535,21 @@ def convert_dat_to_session(
             "session_path": str(session_path),
             "created_at": datetime.now().isoformat(),
         }
+
+        # Добавляем реальные отпечатки, если они переданы
+        if device_info:
+            metadata["device_model"] = device_info.get("device_model", DEVICE_MODEL)
+            metadata["system_version"] = device_info.get("system_version", SYSTEM_VERSION)
+            metadata["app_version"] = device_info.get("app_version", APP_VERSION)
+            if "lang_code" in device_info:
+                metadata["lang_code"] = device_info["lang_code"]
+            if "system_lang_code" in device_info:
+                metadata["system_lang_code"] = device_info["system_lang_code"]
+        else:
+            metadata["device_model"] = DEVICE_MODEL
+            metadata["system_version"] = SYSTEM_VERSION
+            metadata["app_version"] = APP_VERSION
+
         metadata_path = session_path.with_suffix(".meta.json")
         metadata_path.write_text(
             json.dumps(metadata, ensure_ascii=False, indent=2),
@@ -549,6 +561,34 @@ def convert_dat_to_session(
     except Exception:
         logger.exception("Error creating session for acc_%s", phone_number)
         return False
+
+
+def get_client_kwargs_from_meta(session_path: str | Path) -> dict:
+    """
+    Reads client kwargs from a .meta.json file associated with a session.
+    """
+    meta_path = Path(session_path).with_suffix(".meta.json")
+    kwargs = {
+        "device_model": DEVICE_MODEL,
+        "system_version": SYSTEM_VERSION,
+        "app_version": APP_VERSION,
+        "lang_code": "en",
+        "system_lang_code": "en",
+    }
+    if not meta_path.exists():
+        return kwargs
+
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        kwargs["device_model"] = meta.get("device_model", kwargs["device_model"])
+        kwargs["system_version"] = meta.get("system_version", kwargs["system_version"])
+        kwargs["app_version"] = meta.get("app_version", kwargs["app_version"])
+        kwargs["lang_code"] = meta.get("lang_code", kwargs["lang_code"])
+        kwargs["system_lang_code"] = meta.get("system_lang_code", kwargs["system_lang_code"])
+    except (json.JSONDecodeError, Exception):
+        logger.warning("Failed to read or parse .meta.json file: %s", meta_path, exc_info=True)
+
+    return kwargs
 
 
 def convert_dat_to_tdata(phone_number: str) -> bool:
@@ -580,6 +620,32 @@ def convert_dat_to_tdata(phone_number: str) -> bool:
         return False
 
 
+def get_client_kwargs_from_meta(session_path: str | Path) -> dict:
+    """Читает отпечатки из .meta.json для передачи в Telethon."""
+    meta_path = Path(session_path).with_suffix('.meta.json')
+    kwargs = {
+        "device_model": DEVICE_MODEL,
+        "system_version": SYSTEM_VERSION,
+        "app_version": APP_VERSION,
+    }
+    
+    if meta_path.exists():
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            kwargs["device_model"] = data.get("device_model", DEVICE_MODEL)
+            kwargs["system_version"] = data.get("system_version", SYSTEM_VERSION)
+            kwargs["app_version"] = data.get("app_version", APP_VERSION)
+            if "lang_code" in data:
+                kwargs["lang_code"] = data["lang_code"]
+            if "system_lang_code" in data:
+                kwargs["system_lang_code"] = data["system_lang_code"]
+        except Exception as e:
+            logger.error(f"Failed to read meta file {meta_path}: {e}")
+            
+    return kwargs
+
+
 def set_2fa_safe(
     auth_key: str,
     dc_id: int,
@@ -587,9 +653,11 @@ def set_2fa_safe(
     password: Optional[str],
     cur_password: Optional[str] = None,
     hint: str = "my password",
+    session_path: Optional[str | Path] = None,  # <--- Добавили параметр
+    device_info: Optional[Dict[str, str]] = None, # <--- Добавили параметр
 ) -> None:
     """
-    Safely set or reset Telegram 2FA using only auth key + DC.
+    Safely set or reset Telegram 2FA using only auth key + DC and correct fingerprints.
     """
     proxy_list = read_txt_list(f"{country}_proxies.txt")
     if not proxy_list:
@@ -608,16 +676,30 @@ def set_2fa_safe(
         proxy_str_splat[3],
     )
 
+    # Получаем параметры устройства
+    if session_path:
+        client_kwargs = get_client_kwargs_from_meta(session_path)
+    elif device_info:
+        client_kwargs = {
+            "device_model": device_info.get("device_model", DEVICE_MODEL),
+            "system_version": device_info.get("system_version", SYSTEM_VERSION),
+            "app_version": device_info.get("app_version", APP_VERSION),
+        }
+    else:
+        client_kwargs = {
+            "device_model": DEVICE_MODEL,
+            "system_version": SYSTEM_VERSION,
+            "app_version": APP_VERSION,
+        }
+
     converter = Converter()
     client = converter.define_client_from_auth_key(
         auth_key_hex=auth_key,
         dc_id=dc_id,
         api_id=API_ID,
         api_hash=API_HASH,
-        system_version=SYSTEM_VERSION,
-        device_model=DEVICE_MODEL,
-        app_version=APP_VERSION,
         proxy=proxy,
+        **client_kwargs  # <--- Передаем отпечатки прямо в Telethon
     )
 
     try:

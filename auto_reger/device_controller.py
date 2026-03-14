@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import os
@@ -11,6 +11,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Tuple
 from urllib.parse import quote
+
+import uiautomator2 as u2
 
 from .utils import PROJECT_ROOT
 
@@ -227,7 +229,7 @@ class DeviceController:
         "two-step verification enabled",
         "additional password",
         "\u0434\u0432\u0443\u0445\u044d\u0442\u0430\u043f\u043d\u0430\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430",
-        "\u0434\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u0439 \u043f\u0430\u0440\u043e\u043b\u044c",
+        "\u0434\u043e\u043f\u043e\u043b\u043d\u0438\u00ad\u0442\u0435\u043b\u044c\u043d\u044b\u0439 \u043f\u0430\u0440\u043e\u043b\u044c",
     )
     FORGOT_PASSWORD_TEXT_CANDIDATES = (
         "forgot password",
@@ -268,6 +270,7 @@ class DeviceController:
         self.device_id = normalized
         self.adb_path = adb_path
         self.require_root = bool(require_root)
+        self.u2_client = None
         self.telegram_package = self.TELEGRAM_PACKAGE
         self.debug_dir = PROJECT_ROOT / "debug"
         self._root_mode: Optional[str] = "none"
@@ -575,6 +578,7 @@ class DeviceController:
             else:
                 raise RuntimeError(f"ADB device {self.device_id} failed to reach stable `device` state")
         self._ensure_root_access()
+        self.u2_client = u2.connect(self.device_id)
 
     def is_ready(self) -> bool:
         """
@@ -849,236 +853,6 @@ class DeviceController:
 
         raise RuntimeError(
             f"Failed to set proxy on {self.device_id}. Expected={target_proxy!r}, got={current_value!r}"
-        )
-
-    def set_telegram_proxy_via_intent(
-        self,
-        ip: str,
-        port: str,
-        user: str = "",
-        password: str = "",
-    ) -> bool:
-        """
-        Open Telegram SOCKS proxy deep-link and trigger system proxy-enable popup.
-        """
-        host = str(ip or "").strip()
-        port_raw = str(port or "").strip()
-        if not host:
-            LOGGER.error("Telegram proxy intent skipped: empty host for %s", self.device_id)
-            return False
-        if not port_raw.isdigit():
-            LOGGER.error("Telegram proxy intent skipped: invalid port %r for %s", port_raw, self.device_id)
-            return False
-
-        port_value = int(port_raw)
-        if not 1 <= port_value <= 65535:
-            LOGGER.error("Telegram proxy intent skipped: out-of-range port %s for %s", port_value, self.device_id)
-            return False
-
-        deep_link = f"tg://socks?server={host}&port={port_value}"
-        username = str(user or "").strip()
-        user_password = str(password or "").strip()
-
-        if username and user_password:
-            deep_link += f"&user={quote(username, safe='')}&pass={quote(user_password, safe='')}"
-
-        safe_deep_link = f"'{deep_link}'"
-
-        # Даем приложению дополнительное время полностью отрисоваться
-        time.sleep(2.5)
-
-        # Добавляем флаг NEW_TASK (0x10000000) и явно прокидываем windowingMode,
-        # чтобы Android 11+ не проглотил интент из-за ограничений фонового запуска
-        cmd_args = [
-            "shell",
-            "am",
-            "start",
-            "-W",
-            "-a",
-            "android.intent.action.VIEW",
-            "-c",
-            "android.intent.category.BROWSABLE",
-            "-f",
-            "0x10000000",
-            "--windowingMode",
-            "1",
-            "-d",
-            safe_deep_link,
-            "-p",
-            self.telegram_package,
-        ]
-
-        # Отправляем интент первый раз
-        result = self._run_adb(*cmd_args)
-        output = f"{result.stdout}\n{result.stderr}".lower()
-
-        if result.returncode != 0 or "error:" in output or "exception" in output:
-            LOGGER.error(
-                "Failed to open Telegram proxy intent on %s | stdout=%r stderr=%r",
-                self.device_id,
-                (result.stdout or "").strip(),
-                (result.stderr or "").strip(),
-            )
-            return False
-
-        LOGGER.info(
-            "Telegram proxy intent opened on %s for %s:%s (auth=%s)",
-            self.device_id,
-            host,
-            port_value,
-            "yes" if username and user_password else "no",
-        )
-
-        # "Двойной выстрел": Telegram X при холодном старте часто игнорирует первый Intent.
-        # Отправляем интент повторно, чтобы гарантированно триггернуть окно поверх экрана Start.
-        time.sleep(1.5)
-        self._run_adb(*cmd_args, check=False)
-
-        return True
-
-    def enable_telegram_proxy_popup(self, timeout: float = 25.0, poll_interval: float = 1.5) -> str:
-        """
-        Wait for Telegram proxy confirmation popup and tap its positive action.
-
-        :return: Selector description used to tap the button.
-        :raises TimeoutError: If confirmation button was not found in time.
-        """
-        if self.telegram_package == "org.thunderdog.challegram":
-            LOGGER.info("Telegram X proxy popup detected. Using blind tap to click 'Enable'...")
-            time.sleep(2.5)
-            
-            # Смещаем клик правее (X=0.88), чтобы точно попасть в 'Enable'
-            self._tap_percent(0.88, 0.65)
-            time.sleep(0.5)
-            self._tap_percent(0.88, 0.68)
-            
-            # Убираем системный Enter, чтобы случайно не триггернуть 'Cancel'
-            time.sleep(1.5)
-            
-            LOGGER.info("Blind tap completed for Telegram X proxy.")
-            self.wait_and_tap_by_text(self.START_MESSAGING_TEXT_CANDIDATES, timeout=10.0, reason="start messaging after proxy")
-            return "blind-tap-telegram-x"
-        normalized_candidates = [
-            candidate.strip().lower()
-            for candidate in self.PROXY_ENABLE_TEXT_CANDIDATES
-            if str(candidate).strip()
-        ]
-        proxy_enable_resource_ids = self._proxy_enable_resource_ids()
-        detected_texts: set[str] = set()
-        deadline = time.time() + max(timeout, 0.5)
-        while time.time() < deadline:
-            xml_text = self._dump_ui_xml()
-            try:
-                root = ET.fromstring(xml_text)
-            except ET.ParseError:
-                LOGGER.debug("Proxy popup XML parse failed on %s", self.device_id, exc_info=True)
-                time.sleep(max(poll_interval, 0.1))
-                continue
-
-            for text_candidate in self._extract_text_candidates(xml_text):
-                normalized_text = str(text_candidate).strip()
-                if normalized_text:
-                    detected_texts.add(normalized_text)
-
-            # Prefer stable resource-id selectors when available.
-            for resource_id in proxy_enable_resource_ids:
-                for node in root.iter("node"):
-                    if node.attrib.get("resource-id") != resource_id:
-                        continue
-                    center = self._parse_bounds(str(node.attrib.get("bounds", "")))
-                    if not center:
-                        continue
-                    self._tap(*center)
-                    selector = f"resourceId={resource_id}"
-                    LOGGER.info("Tapped Telegram proxy enable button by %s", selector)
-                    return selector
-
-            # Fallback to locale-aware text matching.
-            for node in root.iter("node"):
-                node_text = str(node.attrib.get("text", "")).strip()
-                node_desc = str(node.attrib.get("content-desc", "")).strip()
-                haystack = f"{node_text} {node_desc}".lower()
-                if not haystack:
-                    continue
-
-                matched_candidate = next(
-                    (cand for cand in normalized_candidates if cand and cand in haystack),
-                    "",
-                )
-                if not matched_candidate:
-                    continue
-
-                center = self._parse_bounds(str(node.attrib.get("bounds", "")))
-                if not center:
-                    continue
-                self._tap(*center)
-                selector = (
-                    f"text~{matched_candidate!r} "
-                    f"(node_text={node_text!r}, content_desc={node_desc!r})"
-                )
-                LOGGER.info("Tapped Telegram proxy enable button by %s", selector)
-                time.sleep(4.0)
-                self.wait_and_tap_by_text(self.START_MESSAGING_TEXT_CANDIDATES, timeout=10.0, reason="start messaging after proxy")
-                return selector
-
-            # Some Telegram builds expose button label only via content-desc.
-            for node in root.iter("node"):
-                node_desc = str(node.attrib.get("content-desc", "")).strip()
-                if node_desc.lower() != "connect proxy":
-                    continue
-                center = self._parse_bounds(str(node.attrib.get("bounds", "")))
-                if not center:
-                    continue
-                self._tap(*center)
-                selector = "content-desc='Connect Proxy'"
-                LOGGER.info("Tapped Telegram proxy enable button by %s", selector)
-                time.sleep(4.0)
-                self.wait_and_tap_by_text(self.START_MESSAGING_TEXT_CANDIDATES, timeout=10.0, reason="start messaging after proxy")
-                return selector
-
-            # Compatibility fallback to existing generic helpers.
-            for resource_id in proxy_enable_resource_ids:
-                try:
-                    if self._tap_by_resource_id(resource_id):
-                        selector = f"resourceId={resource_id}"
-                        LOGGER.info("Tapped Telegram proxy enable button by %s", selector)
-                        time.sleep(4.0)
-                        self.wait_and_tap_by_text(self.START_MESSAGING_TEXT_CANDIDATES, timeout=10.0, reason="start messaging after proxy")
-                        return selector
-                except Exception:
-                    LOGGER.debug(
-                        "Proxy popup check by id failed on %s: %s",
-                        self.device_id,
-                        resource_id,
-                        exc_info=True,
-                    )
-
-            try:
-                if self._tap_by_text_candidates(self.PROXY_ENABLE_TEXT_CANDIDATES):
-                    selector = "text-candidates:fallback"
-                    LOGGER.info("Tapped Telegram proxy enable button by %s", selector)
-                    time.sleep(4.0)
-                    self.wait_and_tap_by_text(self.START_MESSAGING_TEXT_CANDIDATES, timeout=10.0, reason="start messaging after proxy")
-                    return selector
-            except Exception:
-                LOGGER.debug("Proxy popup text scan failed on %s", self.device_id, exc_info=True)
-
-            time.sleep(max(poll_interval, 0.1))
-
-        if detected_texts:
-            LOGGER.warning(
-                "Telegram proxy popup timeout on %s. Screen texts: %s",
-                self.device_id,
-                sorted(detected_texts),
-            )
-        else:
-            LOGGER.warning(
-                "Telegram proxy popup timeout on %s. Screen texts were not extracted.",
-                self.device_id,
-            )
-
-        raise TimeoutError(
-            f"Telegram proxy enable popup did not appear on {self.device_id} within {timeout:.1f}s"
         )
 
     def prepare_device(self) -> None:
@@ -1944,11 +1718,9 @@ class DeviceController:
         return False
 
     def _dump_ui_xml(self) -> str:
-        self._adb("shell", "uiautomator", "dump", self.UI_DUMP_PATH, check=False)
-        xml_text = self._adb("shell", "cat", self.UI_DUMP_PATH).stdout
-        if not xml_text.strip():
-            raise RuntimeError("uiautomator dump returned empty XML.")
-        return xml_text
+        if self.u2_client is None:
+            self.u2_client = u2.connect(self.device_id)
+        return self.u2_client.dump_hierarchy()
 
     def _get_cached_ui_xml(self) -> str:
         if self._ui_xml_cache is None:
@@ -2042,7 +1814,7 @@ class DeviceController:
         return ""
 
     def _tap(self, x: int, y: int) -> None:
-        self._adb("shell", "input", "tap", str(x), str(y))
+        self.u2_client.click(x, y)
         self.invalidate_ui_dump_cache()
 
     def _tap_percent(self, x_percent: float, y_percent: float) -> None:
@@ -2056,24 +1828,8 @@ class DeviceController:
         self._tap(x, y)
 
     def _input_text(self, value: str) -> None:
-        text = str(value)
-        if not text:
-            return
-        chunk_size = 2  # Уменьшили чанк для надежности
-        for i in range(0, len(text), chunk_size):
-            chunk = text[i : i + chunk_size]
-            safe_chunk = self._escape_adb_text(chunk)
-            self._adb("shell", "input", "text", safe_chunk)
-            time.sleep(0.15)  # Пауза, чтобы UI успел отрисовать цифры
+        self.u2_client.send_keys(str(value), clear=False)
         self.invalidate_ui_dump_cache()
-
-    @staticmethod
-    def _escape_adb_text(text: str) -> str:
-        escaped = text.replace("\\", "\\\\").replace(" ", "%s")
-        specials = '()<>|;&*\'"!?$#[]{}'
-        for char in specials:
-            escaped = escaped.replace(char, f"\\{char}")
-        return escaped
 
     def dump_screen(self) -> str:
         """

@@ -141,6 +141,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable two-part video recording of the registration process.",
     )
+    parser.add_argument(
+        "--country",
+        type=str,
+        default=None,
+        help="Two-letter ISO country code for SIM spoofing (e.g., ID, GB, US). Overrides proxy/SMS country for emulator.",
+    )
     return parser.parse_args()
 
 
@@ -788,7 +794,9 @@ def resolve_workers(args: argparse.Namespace, devices_count: int) -> int:
     return workers
 
 
-def build_docker_controller_from_config() -> tuple[DockerAndroidController, int]:
+def build_docker_controller_from_config(
+    country_code: Optional[str] = None,
+) -> tuple[DockerAndroidController, int]:
     docker_cfg = CONFIG.get("docker", {})
     if not isinstance(docker_cfg, dict):
         docker_cfg = {}
@@ -810,13 +818,15 @@ def build_docker_controller_from_config() -> tuple[DockerAndroidController, int]
     controller = DockerAndroidController(
         compose_file=compose_file,
         compose_project=project_name,
+        country_code=country_code,
     )
 
     LOGGER.info(
-        "Docker controller configured: project_name=%s, compose_file=%s, boot_timeout_seconds=%s",
+        "Docker controller configured: project_name=%s, compose_file=%s, boot_timeout_seconds=%s, country_code=%s",
         project_name,
         compose_file,
         boot_timeout_seconds,
+        country_code,
     )
     return controller, boot_timeout_seconds
 
@@ -832,6 +842,7 @@ def run_single_cycle(
     last_names: list[str],
     notifier: Optional[TelegramNotifier],
     require_root: bool,
+    sim_country_code: Optional[str] = None,
 ) -> CycleResult:
     device_id = ""
     device: Optional[DeviceController] = None
@@ -849,7 +860,9 @@ def run_single_cycle(
         LOGGER.info("Cycle %s/%s started on device %s", cycle_index, total_cycles, device_id)
         _check_shutdown(stop_event)
 
-        docker_controller, boot_timeout = build_docker_controller_from_config()
+        docker_controller, boot_timeout = build_docker_controller_from_config(
+            country_code=sim_country_code
+        )
         LOGGER.info(
             "Cycle %s/%s pre-flight cleanup: stopping old Docker Android container",
             cycle_index,
@@ -1149,6 +1162,7 @@ def run_single_cycle_with_video(
     last_names: list[str],
     notifier: Optional[TelegramNotifier],
     require_root: bool,
+    sim_country_code: Optional[str] = None,
 ) -> CycleResult:
     device_id = ""
     device: Optional[DeviceController] = None
@@ -1165,7 +1179,9 @@ def run_single_cycle_with_video(
         LOGGER.info("Cycle %s/%s with VIDEO started on device %s", cycle_index, total_cycles, device_id)
         _check_shutdown(stop_event)
 
-        docker_controller, boot_timeout = build_docker_controller_from_config()
+        docker_controller, boot_timeout = build_docker_controller_from_config(
+            country_code=sim_country_code
+        )
         docker_controller.stop_container()
         docker_controller.start_container()
         docker_controller.wait_for_boot(device_udid=device_id, timeout=boot_timeout)
@@ -1395,6 +1411,7 @@ def run(notifier: Optional[TelegramNotifier] = None) -> int:
                         last_names=last_names,
                         notifier=runtime_notifier,
                         require_root=require_root,
+                        sim_country_code=args.country,
                     )
                 )
                 active += 1

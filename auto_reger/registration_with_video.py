@@ -70,32 +70,28 @@ class TelegramRegistratorWithVideo(TelegramRegistrator):
         )
 
         try:
-            # === ТУТ ВАШ UI-КОД ДЛЯ ВВОДА НОМЕРА ===
-            # Примерная последовательность на основе вашего скрипта registration.py
-            self.device_controller.cleanup_telegram()
-            self.device_controller.open_telegram()
-            self._ensure_telegram_opened()
+            try:
+                # === ТУТ ВАШ UI-КОД ДЛЯ ВВОДА НОМЕРА ===
+                # Примерная последовательность на основе вашего скрипта registration.py
+                self.device_controller.cleanup_telegram()
+                self.device_controller.open_telegram()
+                self._ensure_telegram_opened()
 
-            self._click_any(self.START_BUTTON_SELECTORS, "Start Messaging button")
-            
-            # Логика для прокси, если нужно
-            proxy_host = str(proxy_ip or "").strip()
-            proxy_port_value = str(proxy_port or "").strip()
-            if proxy_host and proxy_port_value and hasattr(self.device_controller, "set_telegram_proxy_via_intent"):
-                self.device_controller.set_telegram_proxy_via_intent(proxy_host, proxy_port_value)
-                try:
-                    self._wait_and_enable_proxy_popup(timeout=self.PROXY_ENABLE_TIMEOUT_SECONDS)
-                except TimeoutError:
-                    LOGGER.warning("Telegram proxy popup was not detected; continuing.")
+                self._click_any(self.START_BUTTON_SELECTORS, "Start Messaging button")
+                
+                self._fill_text(self.PHONE_CODE_SELECTOR, normalized_code, "country code input")
+                self._click(self.PHONE_NUMBER_SELECTOR, "phone number input")
+                self._fill_text(self.PHONE_NUMBER_SELECTOR, national_number, "phone number input")
+                self._click_any(self.NEXT_BUTTON_SELECTORS, "Next/Done button")
+                # === КОНЕЦ UI-КОДА ДЛЯ ВВОДА НОМЕРА ===
 
-            self._fill_text(self.PHONE_CODE_SELECTOR, normalized_code, "country code input")
-            self._click(self.PHONE_NUMBER_SELECTOR, "phone number input")
-            self._fill_text(self.PHONE_NUMBER_SELECTOR, national_number, "phone number input")
-            self._click_any(self.NEXT_BUTTON_SELECTORS, "Next/Done button")
-            # === КОНЕЦ UI-КОДА ДЛЯ ВВОДА НОМЕРА ===
-
-            LOGGER.info("Reached the 'Enter Code' screen.")
-
+                LOGGER.info("Reached the 'Enter Code' screen.")
+            except Exception as e:
+                LOGGER.error("Error during registration part 1: %s", e, exc_info=True)
+                raise RegistrationError(
+                    f"Failure during registration part 1: {e}",
+                    video_paths={"video_part1": str(record_part1_path)},
+                ) from e
         finally:
             # Останавливаем первую запись ВНЕ зависимости от успеха
             LOGGER.info("Stopping video recording for part 1.")
@@ -116,6 +112,7 @@ class TelegramRegistratorWithVideo(TelegramRegistrator):
         except RegistrationError as e:
             LOGGER.error("Failed to receive SMS code: %s", e)
             # Если код не пришел, вторая часть видео не будет записана, и мы выйдем.
+            e.video_paths["video_part1"] = str(record_part1_path)
             raise
 
         # =============================================================
@@ -128,38 +125,48 @@ class TelegramRegistratorWithVideo(TelegramRegistrator):
         
         telethon_code = None
         try:
-            # === ТУТ ВАШ UI-КОД ДЛЯ ВВОДА КОДА И РЕГИСТРАЦИИ ===
-            self._fill_text(self.CODE_SELECTOR, sms_code, "SMS code input")
-
-            # Может появиться экран с именем/фамилией
             try:
-                first_name, last_name = self._generate_names(names_generator)
-                self._fill_text(self.FIRST_NAME_SELECTOR, first_name, "first name field", timeout=5.0)
-                self._fill_text(self.LAST_NAME_SELECTOR, last_name, "last name field")
-                self._try_click_any(self.NEXT_BUTTON_SELECTORS, timeout=3.0)
-            except RegistrationError:
-                LOGGER.info("First/last name screen was not detected, skipping.")
+                # === ТУТ ВАШ UI-КОД ДЛЯ ВВОДА КОДА И РЕГИСТРАЦИИ ===
+                self._fill_text(self.CODE_SELECTOR, sms_code, "SMS code input")
 
-            # Обработка всплывающих окон (разрешения, контакты и т.д.)
-            # Этот метод можно вызывать в разных точках, если нужно
-            if hasattr(self.device_controller, '_handle_post_action_popups'):
-                 self.device_controller._handle_post_action_popups(rounds=3, include_accept=True)
+                # Может появиться экран с именем/фамилией
+                try:
+                    first_name, last_name = self._generate_names(names_generator)
+                    self._fill_text(self.FIRST_NAME_SELECTOR, first_name, "first name field", timeout=5.0)
+                    self._fill_text(self.LAST_NAME_SELECTOR, last_name, "last name field")
+                    self._try_click_any(self.NEXT_BUTTON_SELECTORS, timeout=3.0)
+                except RegistrationError:
+                    LOGGER.info("First/last name screen was not detected, skipping.")
 
-            LOGGER.info("Registration/login completed. Proceeding to get Telethon code.")
-            
-            # --- Логика получения кода для Telethon ---
-            # Эта часть предполагает, что у вас где-то есть код, который инициирует
-            # отправку кода авторизации в системный чат Telegram.
-            # Здесь мы просто ждем этот код на экране.
-            
-            # 1. Открываем системный чат Telegram
-            self.device_controller.open_telegram_system_chat()
-            
-            # 2. Читаем код с экрана
-            telethon_code = self.device_controller.read_telegram_code_from_screen(timeout=60)
-            LOGGER.info("Successfully retrieved Telethon login code: %s", telethon_code)
+                # Обработка всплывающих окон (разрешения, контакты и т.д.)
+                # Этот метод можно вызывать в разных точках, если нужно
+                if hasattr(self.device_controller, '_handle_post_action_popups'):
+                     self.device_controller._handle_post_action_popups(rounds=3, include_accept=True)
 
-            # === КОНЕЦ UI-КОДА ДЛЯ РЕГИСТРАЦИИ ===
+                LOGGER.info("Registration/login completed. Proceeding to get Telethon code.")
+                
+                # --- Логика получения кода для Telethon ---
+                # Эта часть предполагает, что у вас где-то есть код, который инициирует
+                # отправку кода авторизации в системный чат Telegram.
+                # Здесь мы просто ждем этот код на экране.
+                
+                # 1. Открываем системный чат Telegram
+                self.device_controller.open_telegram_system_chat()
+                
+                # 2. Читаем код с экрана
+                telethon_code = self.device_controller.read_telegram_code_from_screen(timeout=60)
+                LOGGER.info("Successfully retrieved Telethon login code: %s", telethon_code)
+
+                # === КОНЕЦ UI-КОДА ДЛЯ РЕГИСТРАЦИИ ===
+            except Exception as e:
+                LOGGER.error("Error during registration part 2: %s", e, exc_info=True)
+                raise RegistrationError(
+                    f"Failure during registration part 2: {e}",
+                    video_paths={
+                        "video_part1": str(record_part1_path),
+                        "video_part2": str(record_part2_path),
+                    },
+                ) from e
             
             return {
                 "activation_id": activation_id or "",

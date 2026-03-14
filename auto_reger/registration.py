@@ -12,6 +12,10 @@ LOGGER = logging.getLogger(__name__)
 class RegistrationError(RuntimeError):
     """Raised when registration flow fails."""
 
+    def __init__(self, *args, video_paths: Optional[Dict[str, str]] = None):
+        super().__init__(*args)
+        self.video_paths = video_paths or {}
+
 
 class TelegramRegistrator:
     TELEGRAM_PACKAGE = "org.telegram.messenger"
@@ -89,24 +93,6 @@ class TelegramRegistrator:
         try:
             normalized_code = self._normalize_country_code(country_code)
             self.device_controller.airplane_mode_toggle()
-
-            proxy_host = str(proxy_ip or "").strip()
-            proxy_port_value = str(proxy_port or "").strip()
-            if proxy_host and proxy_port_value and hasattr(self.device_controller, "set_telegram_proxy_via_intent"):
-                intent_applied = self.device_controller.set_telegram_proxy_via_intent(proxy_host, proxy_port_value)
-                if intent_applied:
-                    try:
-                        self._wait_and_enable_proxy_popup(timeout=self.PROXY_ENABLE_TIMEOUT_SECONDS)
-                    except TimeoutError:
-                        LOGGER.warning(
-                            "Telegram proxy popup was not detected on time; continuing registration flow."
-                        )
-                else:
-                    LOGGER.warning(
-                        "Failed to trigger Telegram proxy intent for %s:%s; continuing registration flow.",
-                        proxy_host,
-                        proxy_port_value,
-                    )
 
             activation_id, full_phone_number = self._request_number(normalized_code)
             national_number = self._extract_local_number(full_phone_number, normalized_code)
