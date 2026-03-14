@@ -40,7 +40,9 @@ class TelegramRegistratorWithVideo(TelegramRegistrator):
         country_code: str,
         names_generator: Callable[[], Any] | Iterable[Any],
         proxy_ip: Optional[str] = None,
-        proxy_port: Optional[str] = None,
+        proxy_port: Optional[int] = None,
+        proxy_user: Optional[str] = None,
+        proxy_pass: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Performs Telegram registration with a two-part video recording.
@@ -74,6 +76,13 @@ class TelegramRegistratorWithVideo(TelegramRegistrator):
                 # === ТУТ ВАШ UI-КОД ДЛЯ ВВОДА НОМЕРА ===
                 # Примерная последовательность на основе вашего скрипта registration.py
                 self.device_controller.cleanup_telegram()
+                if proxy_ip and proxy_port:
+                    self.device_controller.set_telegram_proxy_via_intent(
+                        host=proxy_ip,
+                        port=proxy_port,
+                        username=proxy_user,
+                        password=proxy_pass,
+                    )
                 self.device_controller.open_telegram()
                 self._ensure_telegram_opened()
 

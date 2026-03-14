@@ -878,6 +878,7 @@ def run_single_cycle(
         )
         docker_controller.start_container()
         docker_controller.wait_for_boot(device_udid=device_id, timeout=boot_timeout)
+        _check_shutdown(stop_event)
         try:
             docker_controller.install_apk(device_id)
         except Exception:
@@ -947,25 +948,16 @@ def run_single_cycle(
         }
 
         device.launch_telegram()
-        time.sleep(5.0)
 
         if not device.set_telegram_proxy_via_intent(
-            proxy_host,
-            proxy_port,
-            proxy_user,
-            proxy_password,
+            host=proxy_host,
+            port=int(proxy_port),
+            username=proxy_user,
+            password=proxy_password,
         ):
             raise RuntimeError(
                 f"Telegram proxy intent failed for {proxy_host}:{proxy_port} on {device_id}"
             )
-
-        try:
-            time.sleep(3.0)
-            device.enable_telegram_proxy_popup(timeout=25.0)
-        except TimeoutError as exc:
-            raise RuntimeError(
-                "Telegram proxy popup was not confirmed within timeout."
-            ) from exc
 
         _check_shutdown(stop_event)
 
@@ -1185,6 +1177,7 @@ def run_single_cycle_with_video(
         docker_controller.stop_container()
         docker_controller.start_container()
         docker_controller.wait_for_boot(device_udid=device_id, timeout=boot_timeout)
+        _check_shutdown(stop_event)
         try:
             docker_controller.install_apk(device_id)
         except Exception:
@@ -1233,7 +1226,9 @@ def run_single_cycle_with_video(
             country_code=country,
             names_generator=lambda: {"first_name": f"user{random.randint(1000, 9999)}", "last_name": random.choice(last_names)},
             proxy_ip=proxy_host,
-            proxy_port=proxy_port,
+            proxy_port=int(proxy_port),
+            proxy_user=proxy_user,
+            proxy_pass=proxy_password,
         )
         
         phone_number = reg_result["phone_number"]

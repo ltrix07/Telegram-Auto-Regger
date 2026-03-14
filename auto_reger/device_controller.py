@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import os
@@ -48,11 +48,11 @@ class DeviceController:
         "turn on proxy",
         "connect proxy",
         "connect",
-        "\u0432\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u043f\u0440\u043e\u043a\u0441\u0438",
-        "\u0432\u043a\u043b\u044e\u0447\u0438\u0442\u044c",
-        "\u0432\u043a\u043b",
-        "\u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u044c",
-        "\u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u0442\u044c",
+        "\\u0432\\u043a\\u043b\\u044e\\u0447\\u0438\\u0442\\u044c \\u043f\\u0440\\u043e\\u043a\\u0441\\u0438",
+        "\\u0432\\u043a\\u043b\\u044e\\u0447\\u0438\\u0442\\u044c",
+        "\\u0432\\u043a\\u043b",
+        "\\u0438\\u0441\\u043f\\u043e\\u043b\\u044c\\u0437\\u043e\\u0432\\u0430\\u0442\\u044c",
+        "\\u043f\\u043e\\u0434\\u043a\\u043b\\u044e\\u0447\\u0438\\u0442\\u044c",
     )
     PROXY_ENABLE_RESOURCE_ID_SUFFIXES = (
         "button1",
@@ -65,7 +65,7 @@ class DeviceController:
     )
     START_MESSAGING_TEXT_CANDIDATES = (
         "start messaging",
-        "\u043d\u0430\u0447\u0430\u0442\u044c \u043e\u0431\u0449\u0435\u043d\u0438\u0435",
+        "\\u043d\\u0430\\u0447\\u0430\\u0442\\u044c \\u043e\\u0431\\u0449\\u0435\\u043d\\u0438\\u0435",
         "start",
     )
     PHONE_COUNTRY_CODE_RESOURCE_ID_SUFFIXES = (
@@ -82,8 +82,8 @@ class DeviceController:
     NEXT_DONE_TEXT_CANDIDATES = (
         "done",
         "next",
-        "\u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c",
-        "\u0434\u0430\u043b\u0435\u0435",
+        "\\u043f\\u0440\\u043e\\u0434\\u043e\\u043b\\u0436\\u0438\\u0442\\u044c",
+        "\\u0434\\u0430\\u043b\\u0435\\u0435",
     )
     CODE_RESOURCE_ID_SUFFIXES = (
         "login_code_text",
@@ -92,7 +92,7 @@ class DeviceController:
     )
     CODE_TEXT_CANDIDATES = (
         "code",
-        "\u043a\u043e\u0434",
+        "\\u043a\\u043e\\u0434",
         "verification code",
         "sms code",
     )
@@ -110,31 +110,31 @@ class DeviceController:
     PROFILE_FINISH_TEXT_CANDIDATES = (
         "done",
         "finish",
-        "\u0433\u043e\u0442\u043e\u0432",
+        "\\u0433\\u043e\\u0442\\u043e\\u0432",
     )
     CONTINUE_TEXT_CANDIDATES = (
         "continue",
         "continue in english",
-        "\u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c",
-        "\u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c \u043d\u0430 \u0430\u043d\u0433\u043b\u0438\u0439\u0441\u043a\u043e\u043c",
-        "\u0434\u0430\u043b\u0435\u0435",
+        "\\u043f\\u0440\\u043e\\u0434\\u043e\\u043b\\u0436\\u0438\\u0442\\u044c",
+        "\\u043f\\u0440\\u043e\\u0434\\u043e\\u043b\\u0436\\u0438\\u0442\\u044c \\u043d\\u0430 \\u0430\\u043d\\u0433\\u043b\\u0438\\u0439\\u0441\\u043a\\u043e\\u043c",
+        "\\u0434\\u0430\\u043b\\u0435\\u0435",
     )
     YES_TEXT_CANDIDATES = (
         "yes",
-        "\u0434\u0430",
-        "\u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c",
+        "\\u0434\\u0430",
+        "\\u043f\\u043e\\u0434\\u0442\\u0432\\u0435\\u0440\\u0434\\u0438\\u0442\\u044c",
     )
     OK_TEXT_CANDIDATES = (
         "ok",
         "okay",
-        "\u043e\u043a",
-        "\u043f\u043e\u043d\u044f\u0442\u043d\u043e",
+        "\\u043e\\u043a",
+        "\\u043f\\u043e\\u043d\\u044f\\u0442\\u043d\\u043e",
     )
     ACCEPT_TEXT_CANDIDATES = (
         "accept",
         "agree",
-        "\u043f\u0440\u0438\u043d\u044f\u0442\u044c",
-        "\u0441\u043e\u0433\u043b\u0430\u0441\u0435\u043d",
+        "\\u043f\\u0440\\u0438\\u043d\\u044f\\u0442\\u044c",
+        "\\u0441\\u043e\\u0433\\u043b\\u0430\\u0441\\u0435\\u043d",
     )
     ALLOW_TEXT_CANDIDATES = (
         "allow",
@@ -142,10 +142,10 @@ class DeviceController:
         "while using the app",
         "allow all the time",
         "only this time",
-        "\u0440\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044c",
-        "\u0442\u043e\u043b\u044c\u043a\u043e \u043f\u0440\u0438 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043d\u0438\u0438",
-        "\u0440\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044c \u0432\u0441\u0435\u0433\u0434\u0430",
-        "\u0442\u043e\u043b\u044c\u043a\u043e \u0441\u0435\u0439\u0447\u0430\u0441",
+        "\\u0440\\u0430\\u0437\\u0440\\u0435\\u0448\\u0438\\u0442\\u044c",
+        "\\u0442\\u043e\\u043b\\u044c\\u043a\\u043e \\u043f\\u0440\\u0438 \\u0438\\u0441\\u043f\\u043e\\u043b\\u044c\\u0437\\u043e\\u0432\\u0430\\u043d\\u0438\\u0438",
+        "\\u0440\\u0430\\u0437\\u0440\\u0435\\u0448\\u0438\\u0442\\u044c \\u0432\\u0441\\u0435\\u0433\\u0434\\u0430",
+        "\\u0442\\u043e\\u043b\\u044c\\u043a\\u043e \\u0441\\u0435\\u0439\\u0447\\u0430\\u0441",
     )
     ANDROID_ALLOW_RESOURCE_IDS = (
         "android:id/button1",
@@ -159,25 +159,25 @@ class DeviceController:
         "didn't get the code",
         "didnt get the code",
         "did not get the code",
-        "\u043d\u0435 \u043f\u043e\u043b\u0443\u0447\u0438\u043b\u0438 \u043a\u043e\u0434",
-        "\u043d\u0435 \u043f\u0440\u0438\u0448\u0435\u043b \u043a\u043e\u0434",
+        "\\u043d\\u0435 \\u043f\\u043e\\u043b\\u0443\\u0447\\u0438\\u043b\\u0438 \\u043a\\u043e\\u0434",
+        "\\u043d\\u0435 \\u043f\\u0440\\u0438\\u0448\\u0435\\u043b \\u043a\\u043e\\u0434",
     )
     EDIT_NUMBER_TEXT_CANDIDATES = (
         "edit number",
         "edit",
-        "\u0438\u0437\u043c\u0435\u043d\u0438\u0442\u044c \u043d\u043e\u043c\u0435\u0440",
-        "\u0438\u0437\u043c\u0435\u043d\u0438\u0442\u044c",
+        "\\u0438\\u0437\\u043c\\u0435\\u043d\\u0438\\u0442\\u044c \\u043d\\u043e\\u043c\\u0435\\u0440",
+        "\\u0438\\u0437\\u043c\\u0435\\u043d\\u0438\\u0442\\u044c",
     )
     BACK_TEXT_CANDIDATES = (
         "back",
         "go back",
-        "\u043d\u0430\u0437\u0430\u0434",
+        "\\u043d\\u0430\\u0437\\u0430\\u0434",
     )
     NUMBER_BANNED_TEXT_CANDIDATES = (
         "this phone number is banned",
         "phone number is banned",
-        "\u044d\u0442\u043e\u0442 \u043d\u043e\u043c\u0435\u0440 \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d",
-        "\u043d\u043e\u043c\u0435\u0440 \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d",
+        "\\u044d\\u0442\\u043e\\u0442 \\u043d\\u043e\\u043c\\u0435\\u0440 \\u0437\\u0430\\u0431\\u043b\\u043e\\u043a\\u0438\\u0440\\u043e\\u0432\\u0430\\u043d",
+        "\\u043d\\u043e\\u043c\\u0435\\u0440 \\u0437\\u0430\\u0431\\u043b\\u043e\\u043a\\u0438\\u0440\\u043e\\u0432\\u0430\\u043d",
     )
     ALREADY_REGISTERED_TEXT_CANDIDATES = (
         "check your telegram messages",
@@ -185,23 +185,23 @@ class DeviceController:
         "we sent the code to the telegram app",
         "sent the code to the telegram app",
         "app on your other device",
-        "\u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f telegram",
-        "\u043e\u0442\u043f\u0440\u0430\u0432\u0438\u043b\u0438 \u043a\u043e\u0434 \u0432 \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u0435 telegram",
+        "\\u043f\\u0440\\u043e\\u0432\\u0435\\u0440\\u044c\\u0442\\u0435 \\u0441\\u043e\\u043e\\u0431\\u0449\\u0435\\u043d\\u0438\\u044f telegram",
+        "\\u043e\\u0442\\u043f\\u0440\\u0430\\u0432\\u0438\\u043b\\u0438 \\u043a\\u043e\\u0434 \\u0432 \\u043f\\u0440\\u0438\\u043b\\u043e\\u0436\\u0435\\u043d\\u0438\\u0435 telegram",
     )
     EMAIL_BANNED_TEXT_CANDIDATES = (
         "email address is banned",
         "email is banned",
         "invalid email",
-        "\u0430\u0434\u0440\u0435\u0441 \u044d\u043b\u0435\u043a\u0442\u0440\u043e\u043d\u043d\u043e\u0439 \u043f\u043e\u0447\u0442\u044b \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d",
-        "\u044d\u043b\u0435\u043a\u0442\u0440\u043e\u043d\u043d\u0430\u044f \u043f\u043e\u0447\u0442\u0430 \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u0430",
-        "\u043f\u043e\u0447\u0442\u0430 \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u0430",
-        "\u043d\u0435\u0432\u0435\u0440\u043d\u044b\u0439 \u0430\u0434\u0440\u0435\u0441",
+        "\\u0430\\u0434\\u0440\\u0435\\u0441 \\u044d\\u043b\\u0435\\u043a\\u0442\\u0440\\u043e\\u043d\\u043d\\u043e\\u0439 \\u043f\\u043e\\u0447\\u0442\\u044b \\u0437\\u0430\\u0431\\u043b\\u043e\\u043a\\u0438\\u0440\\u043e\\u0432\\u0430\\u043d",
+        "\\u044d\\u043b\\u0435\\u043a\\u0442\\u0440\\u043e\\u043d\\u043d\\u0430\\u044f \\u043f\\u043e\\u0447\\u0442\\u0430 \\u0437\\u0430\\u0431\\u043b\\u043e\\u043a\\u0438\\u0440\\u043e\\u0432\\u0430\\u043d\\u0430",
+        "\\u043f\\u043e\\u0447\\u0442\\u0430 \\u0437\\u0430\\u0431\\u043b\\u043e\\u043a\\u0438\\u0440\\u043e\\u0432\\u0430\\u043d\\u0430",
+        "\\u043d\\u0435\\u0432\\u0435\\u0440\\u043d\\u044b\\u0439 \\u0430\\u0434\\u0440\\u0435\\u0441",
     )
     TOO_MANY_ATTEMPTS_TEXT_CANDIDATES = (
         "too many attempts",
         "try again later",
-        "слишком много попыток",
-        "попробуйте позже",
+        "\\u0441\\u043b\\u0438\\u0448\\u043a\\u043e\\u043c \\u043c\\u043d\\u043e\\u0433\\u043e \\u043f\\u043e\\u043f\\u044b\\u0442\\u043e\\u043a",
+        "\\u043f\\u043e\\u043f\\u0440\\u043e\\u0431\\u0443\\u0439\\u0442\\u0435 \\u043f\\u043e\\u0437\\u0436\\u0435",
     )
     API_ERROR_TEXT_CANDIDATES = (
         "email_code_empty",
@@ -209,7 +209,7 @@ class DeviceController:
         "rpc_error",
         "internal server error",
         "an error occurred",
-        "произошла ошибка",
+        "\\u043f\\u0440\\u043e\\u0438\\u0437\\u043e\\u0448\\u043b\\u0430 \\u043e\\u0448\\u0438\\u0431\\u043a\\u0430",
     )
     EXISTING_ACCOUNT_TEXT_CANDIDATES = (
         "check your telegram messages",
@@ -220,41 +220,41 @@ class DeviceController:
         "sent a code to the email address",
         "sent to the email address",
         "code to the email",
-        "\u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f telegram",
-        "\u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u043f\u043e\u0447\u0442\u0443",
-        "\u0432\u0432\u0435\u0434\u0438\u0442\u0435 \u043a\u043e\u0434 \u0438\u0437 \u043f\u0438\u0441\u044c\u043c\u0430",
-        "\u043a\u043e\u0434 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d \u043d\u0430 \u043f\u043e\u0447\u0442\u0443",
+        "\\u043f\\u0440\\u043e\\u0432\\u0435\\u0440\\u044c\\u0442\\u0435 \\u0441\\u043e\\u043e\\u0431\\u0449\\u0435\\u043d\\u0438\\u044f telegram",
+        "\\u043f\\u0440\\u043e\\u0432\\u0435\\u0440\\u044c\\u0442\\u0435 \\u043f\\u043e\\u0447\\u0442\\u0443",
+        "\\u0432\\u0432\\u0435\\u0434\\u0438\\u0442\\u0435 \\u043a\\u043e\\u0434 \\u0438\\u0437 \\u043f\\u0438\\u0441\\u044c\\u043c\\u0430",
+        "\\u043a\\u043e\\u0434 \\u043e\\u0442\\u043f\\u0440\\u0430\\u0432\\u043b\\u0435\\u043d \\u043d\\u0430 \\u043f\\u043e\\u0447\\u0442\\u0443",
     )
     TWO_FA_REQUIRED_TEXT_CANDIDATES = (
         "two-step verification enabled",
         "additional password",
-        "\u0434\u0432\u0443\u0445\u044d\u0442\u0430\u043f\u043d\u0430\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430",
-        "\u0434\u043e\u043f\u043e\u043b\u043d\u0438\u00ad\u0442\u0435\u043b\u044c\u043d\u044b\u0439 \u043f\u0430\u0440\u043e\u043b\u044c",
+        "\\u0434\\u0432\\u0443\\u0445\\u044d\\u0442\\u0430\\u043f\\u043d\\u0430\\u044f \\u043f\\u0440\\u043e\\u0432\\u0435\\u0440\\u043a\\u0430",
+        "\\u0434\\u043e\\u043f\\u043e\\u043b\\u043d\\u0438\\u00ad\\u0442\\u0435\\u043b\\u044c\\u043d\\u044b\\u0439 \\u043f\\u0430\\u0440\\u043e\\u043b\\u044c",
     )
     FORGOT_PASSWORD_TEXT_CANDIDATES = (
         "forgot password",
-        "\u0437\u0430\u0431\u044b\u043b\u0438 \u043f\u0430\u0440\u043e\u043b\u044c",
+        "\\u0437\\u0430\\u0431\\u044b\\u043b\\u0438 \\u043f\\u0430\\u0440\\u043e\\u043b\\u044c",
     )
     RESET_ACCOUNT_TEXT_CANDIDATES = (
         "reset account",
-        "\u0441\u0431\u0440\u043e\u0441\u0438\u0442\u044c \u0430\u043a\u043a\u0430\u0443\u043d\u0442",
-        "\u0441\u0431\u0440\u043e\u0441\u0438\u0442\u044c \u0443\u0447\u0435\u0442\u043d\u0443\u044e \u0437\u0430\u043f\u0438\u0441\u044c",
+        "\\u0441\\u0431\\u0440\\u043e\\u0441\\u0438\\u0442\\u044c \\u0430\\u043a\\u043a\\u0430\\u0443\\u043d\\u0442",
+        "\\u0441\\u0431\\u0440\\u043e\\u0441\\u0438\\u0442\\u044c \\u0443\\u0447\\u0435\\u0442\\u043d\\u0443\\u044e \\u0437\\u0430\\u043f\\u0438\\u0441\\u044c",
     )
     GET_CODE_VIA_SMS_TEXT_CANDIDATES = (
         "get the code via sms",
         "via sms",
-        "\u043f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u043a\u043e\u0434 \u043f\u043e sms",
-        "\u043f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u043a\u043e\u0434 \u043f\u043e \u0441\u043c\u0441",
+        "\\u043f\\u043e\\u043b\\u0443\\u0447\\u0438\\u0442\\u044c \\u043a\\u043e\\u0434 \\u043f\\u043e sms",
+        "\\u043f\\u043e\\u043b\\u0443\\u0447\\u0438\\u0442\\u044c \\u043a\\u043e\\u0434 \\u043f\\u043e \\u0441\\u043c\\u0441",
     )
     SMS_FEE_TEXT_CANDIDATES = (
         "sms fee",
-        "\u043f\u043b\u0430\u0442\u0430 \u0437\u0430 sms",
-        "\u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c sms",
+        "\\u043f\\u043b\\u0430\\u0442\\u0430 \\u0437\\u0430 sms",
+        "\\u0441\\u0442\\u043e\\u0438\\u043c\\u043e\\u0441\\u0442\\u044c sms",
     )
     EMAIL_FIELD_TEXT_CANDIDATES = (
         "email",
         "mail",
-        "\u043f\u043e\u0447\u0442",
+        "\\u043f\\u043e\\u0447\\u0442",
         "@",
     )
 
@@ -290,7 +290,7 @@ class DeviceController:
         cmd = [self.adb_path, "-s", self.device_id, *args]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
-        offline_error = f"{result.stdout}\n{result.stderr}".lower()
+        offline_error = f"{result.stdout}\\n{result.stderr}".lower()
         if result.returncode != 0 and "device offline" in offline_error:
             LOGGER.warning("ADB device %s is offline. Reconnecting and retrying command: %s", self.device_id, " ".join(cmd))
             if ":" in self.device_id:
@@ -478,7 +478,6 @@ class DeviceController:
             )
 
     def _safe_mv(self, source: str, destination: str) -> bool:
-        # Упрощенная команда без if/then/elif, чтобы избежать синтаксических ошибок в Android sh
         cmd = f"test -f {source} && mv {source} {destination} && echo moved || echo skipped"
 
         result = self._adb(
@@ -595,7 +594,7 @@ class DeviceController:
                 return False
 
             wm_size = self._adb("shell", "wm", "size", timeout=10).stdout
-            if not re.search(r"\d+x\d+", wm_size):
+            if not re.search(r"\\d+x\\d+", wm_size):
                 LOGGER.error("Device %s screen is not responsive (wm size=%r)", self.device_id, wm_size)
                 return False
 
@@ -874,73 +873,20 @@ class DeviceController:
 
     def launch_telegram(self) -> None:
         """
-        Launch official Telegram or fork app via am start command
-        and dynamically wait for the UI to fully render and pass the start screen.
-        This method uses an aggressive launch strategy to bypass background start restrictions.
+        Launch official Telegram or fork app using uiautomator2 for maximum reliability.
         """
         LOGGER.info("Launching Telegram on %s", self.device_id)
         self.invalidate_ui_dump_cache()
+        time.sleep(3.0)
 
-        # Give the system time to fully initialize the graphics stack, especially on single-core CPUs.
-        time.sleep(15.0)
+        if self.u2_client is None:
+            self.u2_client = u2.connect(self.device_id)
 
-        # Determine the correct main activity for the detected package.
-        activity_suffix = ".ui.LaunchActivity"  # Default for official client and most forks
-        if self.telegram_package == "org.thunderdog.challegram":
-            activity_suffix = ".MainActivity"  # For Telegram X
-
-        # Correctly form the component name. The '.' prefix is a shortcut for the package name.
-        component_name = f"{self.telegram_package}/{activity_suffix}"
-
-        # Aggressive launch command to bypass background start restrictions, as requested for Android 11+
-        launch_command_args = [
-            "shell", "am", "start", "-W", "-n", component_name,
-            "-a", "android.intent.action.MAIN",
-            "-c", "android.intent.category.LAUNCHER",
-            "--windowingMode", "1"
-        ]
-
-        # More reliable process check command
-        process_check_command_args = ["shell", "ps", "-A", "|", "grep", self.telegram_package]
-        launched = False
-
-        # Total attempts: 3 regular + 1 fallback with HOME key
-        for attempt in range(1, 5):
-            LOGGER.info(
-                "Attempting to launch Telegram (attempt %d/4): %s",
-                attempt,
-                component_name
-            )
-
-            # On the 4th attempt (after 3 failures), try the Home key fallback.
-            if attempt == 4:
-                LOGGER.warning("Final launch attempt: using Home key fallback.")
-                self._adb("shell", "input", "keyevent", "3", check=False)  # Home button
-                time.sleep(2.0)
-
-            self._adb(*launch_command_args, check=False)
-            time.sleep(2.0)  # Wait for process to appear
-
-            # Check if the process is running
-            pid_result = self._adb(*process_check_command_args, check=False)
-
-            if pid_result.stdout and self.telegram_package in pid_result.stdout:
-                LOGGER.info(
-                    "Successfully launched %s, process found:\n%s",
-                    self.telegram_package,
-                    pid_result.stdout.strip()
-                )
-                launched = True
-                break
-
-            LOGGER.warning(
-                "Process for %s not found after 'am start'. Retrying...",
-                self.telegram_package
-            )
-            time.sleep(3.0)
-
-        if not launched:
-            raise RuntimeError(f"Failed to launch Telegram and confirm process start after 4 attempts on {self.device_id}.")
+        try:
+            self.u2_client.app_start(self.telegram_package, stop=True)
+        except Exception as e:
+            LOGGER.error("uiautomator2 app_start failed, falling back to monkey: %s", e)
+            self._adb("shell", "monkey", "-p", self.telegram_package, "-c", "android.intent.category.LAUNCHER", "1", check=False)
 
         LOGGER.info("Waiting for app interface to load (first launch may take 60+ seconds)...")
         deadline = time.time() + 60.0
@@ -955,7 +901,7 @@ class DeviceController:
 
         if not app_ready:
             raise RuntimeError(
-                "App load timeout: Telegram UI failed to render the start screen within the time limit."
+                "App load timeout: Telegram UI failed to render. (Possible APK architecture mismatch - ensure you use x86_64 or Universal APK)."
             )
         else:
             LOGGER.info("Telegram interface successfully loaded and is ready for proxy setup.")
@@ -1106,7 +1052,7 @@ class DeviceController:
         LOGGER.info("Waiting for phone UI to fully render...")
         ui_ready = self.wait_for_ui_state(
             resource_suffixes=self.PHONE_NUMBER_RESOURCE_ID_SUFFIXES,
-            text_candidates=("phone", "country", "номер телефона"),
+            text_candidates=("phone", "country", "\\u043d\\u043e\\u043c\\u0435\\u0440 \\u0442\\u0435\\u043b\\u0435\\u0444\\u043e\\u043d\\u0430"),
             timeout=20.0,
         )
         if not ui_ready:
@@ -1115,10 +1061,9 @@ class DeviceController:
         # Let the UI finish any subtle layout shifts.
         time.sleep(0.5)
 
-        phone_digits = re.sub(r"\D", "", phone_number)
-        cc_digits = re.sub(r"\D", "", country_code) if country_code else ""
+        phone_digits = re.sub(r"\\D", "", phone_number)
+        cc_digits = re.sub(r"\\D", "", country_code) if country_code else ""
 
-        # Убираем код страны из начала номера, чтобы не напечатать его дважды
         if cc_digits and phone_digits.startswith(cc_digits):
             phone_digits = phone_digits[len(cc_digits):]
 
@@ -1129,11 +1074,9 @@ class DeviceController:
                 reason="country code field",
             )
             if not tapped_cc:
-                # Fallback: Координаты для поля кода страны (левая часть экрана над линией)
                 self._tap_percent(0.20, 0.42)
                 LOGGER.debug("Tapped country code field by fallback coordinates")
 
-            # Стираем дефолтный код страны (эмулятор мог подставить локальный код)
             for _ in range(4):
                 self._adb("shell", "input", "keyevent", "67", check=False)  # KEYCODE_DEL (Backspace)
 
@@ -1146,24 +1089,21 @@ class DeviceController:
             reason="phone number field",
         )
         if not tapped_phone:
-            # Fallback: Координаты для основного поля номера (центр/правая часть экрана)
             self._tap_percent(0.60, 0.42)
             LOGGER.debug("Tapped phone number field by fallback coordinates")
 
         self._input_text(phone_digits)
         time.sleep(0.5)
 
-        # Добавляем ID круглой кнопки (Floating Action Button), которую используют форки
         next_btn_resources = ("login_btn", "next_button", "done_button", "ok_button", "floating_button", "fab")
 
         if not self.wait_and_tap_resource(next_btn_resources, timeout=6.0, reason="submit phone number"):
             if not self.wait_and_tap_by_text(self.NEXT_DONE_TEXT_CANDIDATES, timeout=3.0, reason="submit phone number"):
-                # Fallback: Координаты круглой кнопки "Далее" (правый нижний угол)
                 self._tap_percent(0.85, 0.85)
             self._adb("shell", "input", "keyevent", "66", check=False)  # KEYCODE_ENTER
             self.invalidate_ui_dump_cache()
 
-        self._safe_tap_by_text_candidates(["yes", "да"], reason="confirm phone number")
+        self._safe_tap_by_text_candidates(["yes", "\\u0434\\u0430"], reason="confirm phone number")
 
         LOGGER.info("Waiting for code/email screen after phone submission...")
         ui_next_ready = self.wait_for_ui_state(
@@ -1189,10 +1129,8 @@ class DeviceController:
         Input verification SMS code in Telegram.
         """
         LOGGER.info("Inputting SMS code on Telegram UI")
-        # Кнопка "получить код по СМС" может быть, а может не быть, не ждем ее долго
         self._safe_tap_by_text_candidates(self.GET_CODE_VIA_SMS_TEXT_CANDIDATES, reason="request code via SMS")
 
-        # Динамически ждем появления поля кода (и ловим баны/too many attempts)
         ui_ready = self.wait_for_ui_state(
             resource_suffixes=self.CODE_RESOURCE_ID_SUFFIXES,
             text_candidates=self.CODE_TEXT_CANDIDATES,
@@ -1204,16 +1142,13 @@ class DeviceController:
         if not ui_ready:
             raise RuntimeError("Telegram UI failed to render code input fields in time.")
 
-        # Убираем агрессивные клики, просто даем время клавиатуре и вводим код
         time.sleep(1.0)
         self._input_text(str(code))
 
         time.sleep(0.5)
-        # Явное нажатие кнопки "Далее", так как Telegram X не всегда сабмитит код сам
         next_btn_resources = ("login_btn", "next_button", "done_button", "ok_button", "floating_button", "fab")
         if not self.wait_and_tap_resource(next_btn_resources, timeout=4.0, reason="submit code"):
             if not self.wait_and_tap_by_text(self.NEXT_DONE_TEXT_CANDIDATES, timeout=2.0, reason="submit code"):
-                # Fallback: Координаты круглой кнопки (правый нижний угол)
                 self._tap_percent(0.85, 0.85)
             self._adb("shell", "input", "keyevent", "66", check=False)  # KEYCODE_ENTER
 
@@ -1274,7 +1209,6 @@ class DeviceController:
         Fill first/last name step in Telegram profile setup.
         """
         LOGGER.info("Filling Telegram profile name fields")
-        # Ждем появления поля имени (и ловим возможные баны)
         ui_ready = self.wait_for_ui_state(
             resource_suffixes=self.FIRST_NAME_RESOURCE_ID_SUFFIXES,
             timeout=15.0,
@@ -1303,7 +1237,6 @@ class DeviceController:
                 self._tap_percent(0.85, 0.85)
             self._adb("shell", "input", "keyevent", "66", check=False)
 
-        # Ждем загрузки интерфейса чатов после регистрации
         self.wait_for_ui_state(
             timeout=10.0,
             check_blockers=True,
@@ -1346,12 +1279,10 @@ class DeviceController:
     def _handle_post_action_popups(self, rounds: int = 3, include_accept: bool = False) -> None:
         max_rounds = max(int(rounds), 0)
         for _ in range(max_rounds):
-            # 1. Сбрасываем кеш ровно ОДИН раз в начале раунда
             self.invalidate_ui_dump_cache()
             
             tapped_any = False
             
-            # 2. Используем базовые методы _tap_*, которые не сбрасывают кеш
             if include_accept and self._tap_by_text_candidates(self.ACCEPT_TEXT_CANDIDATES):
                 LOGGER.debug("Tapped `accept` popup")
                 tapped_any = True
@@ -1365,23 +1296,19 @@ class DeviceController:
                 LOGGER.debug("Tapped `continue` popup")
                 tapped_any = True
             else:
-                # Проверяем системные ID кнопок (используем базовый метод)
                 for resource_id in self.ANDROID_ALLOW_RESOURCE_IDS:
                     if self._tap_by_resource_id(resource_id):
                         LOGGER.debug("Tapped Android allow button by resource-id `%s`", resource_id)
                         tapped_any = True
                         break
                 
-                # Если системные ID не сработали, проверяем по тексту
                 if not tapped_any and self._tap_by_text_candidates(self.ALLOW_TEXT_CANDIDATES):
                     LOGGER.debug("Tapped `allow` popup")
                     tapped_any = True
 
-            # 3. Если мы ничего не нажали в этом раунде, значит попапов больше нет — выходим
             if not tapped_any:
                 break
                 
-            # Если что-то нажали — ждем анимацию перед следующим дампом
             time.sleep(0.05)
 
     def _screen_contains_candidates(self, candidates: Iterable[str]) -> bool:
@@ -1465,8 +1392,6 @@ class DeviceController:
         )
         time.sleep(4)
 
-        # Очищаем экран от окон Terms of Service / Privacy Policy,
-        # которые блокируют UI и не закрываются кнопкой "Назад"
         LOGGER.info("Clearing potential popups (like Terms of Service) before reading code")
         self._handle_post_action_popups(rounds=2, include_accept=True)
 
@@ -1475,7 +1400,7 @@ class DeviceController:
             self._adb("shell", "input", "keyevent", "4", check=False)
             time.sleep(0.3)
 
-        if self._tap_by_text_candidates(("Telegram", "\u0422\u0435\u043b\u0435\u0433\u0440\u0430\u043c")):
+        if self._tap_by_text_candidates(("Telegram", "\\u0422\\u0435\\u043b\\u0435\\u0433\\u0440\\u0430\\u043c")):
             time.sleep(0.8)
             return
 
@@ -1493,7 +1418,7 @@ class DeviceController:
         LOGGER.info("Reading Telegram login code from UI dump")
         deadline = time.time() + timeout
         patterns = (
-            re.compile(r"(?i)(?:web\s+login\s+code|login\s+code|login|code|\u043a\u043e\u0434)[^\d]{0,40}(\d{5,6})"),
+            re.compile(r"(?i)(?:web\\s+login\\s+code|login\\s+code|login|code|\\u043a\\u043e\\u0434)[^\\d]{0,40}(\\d{5,6})"),
         )
 
         while time.time() < deadline:
@@ -1576,7 +1501,6 @@ class DeviceController:
         )
         packages_out = result.stdout or ""
         
-        # Добавлены все популярные форки для авторега
         candidates = [
             "org.telegram.messenger",
             "org.telegram.messenger.web",
@@ -1593,7 +1517,6 @@ class DeviceController:
                 LOGGER.info("Successfully detected Telegram package: %s", package_name)
                 return True
 
-        # Расширенный поиск по ключевым словам
         telegram_lines = [
             line for line in packages_out.splitlines() 
             if any(kw in line.lower() for kw in ("telegram", "thunderdog", "nekomimi", "ayugram"))
@@ -1742,7 +1665,7 @@ class DeviceController:
 
     @staticmethod
     def _parse_bounds(bounds: str) -> Optional[Tuple[int, int]]:
-        match = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds or "")
+        match = re.match(r"\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]", bounds or "")
         if not match:
             return None
         left, top, right, bottom = map(int, match.groups())
@@ -1819,7 +1742,7 @@ class DeviceController:
 
     def _tap_percent(self, x_percent: float, y_percent: float) -> None:
         wm_size = self._adb("shell", "wm", "size").stdout
-        match = re.search(r"(\d+)x(\d+)", wm_size)
+        match = re.search(r"(\\d+)x(\\d+)", wm_size)
         if not match:
             raise RuntimeError(f"Unable to parse screen size from `wm size`: {wm_size!r}")
         width, height = map(int, match.groups())

@@ -37,3 +37,18 @@ RuntimeError: Proxy-Seller API returned error payload on /resident/list/add: {'s
 2026-02-23 23:17:06,940 - INFO - proxy_api.py:256 - _create_list() - Resident list created for country=US, list_id=10.
 2026-02-23 23:17:06,940 - INFO - proxy_api.py:173 - _ensure_proxies_loaded() - Resident list created for country=US, list_id=10.
 2026-02-23 23:17:06,940 - INFO - proxy_api.py:226 - _ensure_proxies_loaded() - Сгенерировано 2 портов для res.proxy-seller.com (country=US, list_id=10).
+2026-03-14 14:40:58,162 - INFO - adb.py:406 - connect_adb() - Attempt 1/3 to connect to 127.0.0.1:5555
+2026-03-14 14:41:02,340 - INFO - adb.py:420 - connect_adb() - ADB connect response for 127.0.0.1:5555: cannot connect to 127.0.0.1:5555: РџРѕРґРєР»СЋС‡РµРЅРёРµ РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅРѕ, С‚.Рє. РєРѕРЅРµС‡РЅС‹Р№ РєРѕРјРїСЊСЋС‚РµСЂ РѕС‚РІРµСЂРі Р·Р°РїСЂРѕСЃ РЅР° РїРѕРґРєР»СЋС‡РµРЅРёРµ. (10061)
+2026-03-14 14:41:04,372 - INFO - adb.py:406 - connect_adb() - Attempt 2/3 to connect to 127.0.0.1:5555
+2026-03-14 14:41:06,427 - INFO - adb.py:420 - connect_adb() - ADB connect response for 127.0.0.1:5555: cannot connect to 127.0.0.1:5555: РџРѕРґРєР»СЋС‡РµРЅРёРµ РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅРѕ, С‚.Рє. РєРѕРЅРµС‡РЅС‹Р№ РєРѕРјРїСЊСЋС‚РµСЂ РѕС‚РІРµСЂРі Р·Р°РїСЂРѕСЃ РЅР° РїРѕРґРєР»СЋС‡РµРЅРёРµ. (10061)
+2026-03-14 14:41:08,452 - INFO - adb.py:406 - connect_adb() - Attempt 3/3 to connect to 127.0.0.1:5555
+2026-03-14 14:41:10,509 - INFO - adb.py:420 - connect_adb() - ADB connect response for 127.0.0.1:5555: cannot connect to 127.0.0.1:5555: РџРѕРґРєР»СЋС‡РµРЅРёРµ РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅРѕ, С‚.Рє. РєРѕРЅРµС‡РЅС‹Р№ РєРѕРјРїСЊСЋС‚РµСЂ РѕС‚РІРµСЂРі Р·Р°РїСЂРѕСЃ РЅР° РїРѕРґРєР»СЋС‡РµРЅРёРµ. (10061)
+2026-03-14 14:41:12,533 - ERROR - adb.py:441 - connect_adb() - Failed to connect to 127.0.0.1:5555 after 3 attempts
+2026-03-14 14:41:12,533 - ERROR - smoke_test.py:235 - <module>() - Smoke test failed: ADB connect/root check failed for device 127.0.0.1:5555
+Traceback (most recent call last):
+  File "C:\Users\Владимир\PycharmProjects\Telegrm-Auto-Regger\smoke_test.py", line 233, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "C:\Users\Владимир\PycharmProjects\Telegrm-Auto-Regger\smoke_test.py", line 176, in main
+    raise RuntimeError(f"ADB connect/root check failed for device {device_id}")
+RuntimeError: ADB connect/root check failed for device 127.0.0.1:5555
