@@ -594,7 +594,7 @@ class DeviceController:
                 return False
 
             wm_size = self._adb("shell", "wm", "size", timeout=10).stdout
-            if not re.search(r"\\d+x\\d+", wm_size):
+            if "Physical size:" not in wm_size and "Override size:" not in wm_size:
                 LOGGER.error("Device %s screen is not responsive (wm size=%r)", self.device_id, wm_size)
                 return False
 
@@ -1742,7 +1742,7 @@ class DeviceController:
 
     def _tap_percent(self, x_percent: float, y_percent: float) -> None:
         wm_size = self._adb("shell", "wm", "size").stdout
-        match = re.search(r"(\\d+)x(\\d+)", wm_size)
+        match = re.search(r"(\d+)\s*x\s*(\d+)", wm_size)
         if not match:
             raise RuntimeError(f"Unable to parse screen size from `wm size`: {wm_size!r}")
         width, height = map(int, match.groups())
