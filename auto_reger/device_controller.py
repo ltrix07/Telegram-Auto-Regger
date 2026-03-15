@@ -1273,44 +1273,35 @@ class DeviceController:
         self._handle_post_action_popups(rounds=3, include_accept=False)
 
     def input_email(self, email: str) -> None:
-        """
-        Input email on Telegram's email verification step (if requested).
-        """
         LOGGER.info("Inputting email on Telegram UI")
-        ui_ready = self.wait_for_ui_state(
-            resource_suffixes=("email", "login_email_field", "email_field"),
-            text_candidates=self.EMAIL_FIELD_TEXT_CANDIDATES,
-            timeout=15.0,
-            check_blockers=True,
-            step_name="email submission",
-            include_existing_account=False,
-        )
-        if not ui_ready:
-            self._dump_debug_info_and_raise("Telegram UI failed to render email input field in time.")
-
-        tapped = self.wait_and_tap_resource(
-            ("email", "login_email_field", "email_field"),
-            timeout=5.0,
-            reason="email field",
-        )
-        if not tapped:
-            if not self.wait_and_tap_by_text(self.EMAIL_FIELD_TEXT_CANDIDATES, timeout=3.0, reason="email field"):
-                # Клик по обновленным координатам (поле почты находится в верхней трети экрана)
-                self._tap_percent(0.5, 0.33)
-
+        
+        # 1. Вводим почту
         self.human_typing(email)
-        # 1. Сначала пробуем нажать "Enter" на системной клавиатуре Android (KeyCode 66)
+        import time
+        time.sleep(1.5)
+        
+        # 2. Кликаем в пустую верхнюю часть экрана (например, в заголовок), 
+        # чтобы убрать фокус с поля ввода и скрыть виртуальную клавиатуру!
+        self._tap_percent(0.5, 0.2)
+        time.sleep(1.0)
+        
+        # 3. Пробуем системный Enter на всякий случай
         self._adb("shell", "input", "keyevent", "66", check=False)
         time.sleep(1.0)
         
-        # 2. Пробуем кликнуть по текстовым кнопкам, если они есть
-        self._safe_tap_by_text_candidates(["done", "submit", "next", "далее", "готово", "продолжить"], reason="submit email")
-        
-        # 3. Слепой клик по Floating Action Button (синяя круглая кнопка со стрелочкой) 
-        # Она обычно находится внизу справа, над клавиатурой (примерно 85% по X и 80% по Y)
-        self._tap_percent(0.85, 0.80)
-
-        self._handle_post_action_popups(rounds=2, include_accept=False)
+        # 4. Ищем круглую синюю кнопку по системному тегу content-desc="Done"
+        xml_dump = self._dump_ui_xml()
+        import re
+        match = re.search(r'content-desc="Done".*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml_dump)
+        if match:
+            x1, y1, x2, y2 = map(int, match.groups())
+            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+            self._adb("shell", "input", "tap", str(cx), str(cy), check=False)
+            LOGGER.info(f"Tapped 'Done' button via content-desc at {cx}, {cy}")
+        else:
+            # 5. Резервный клик (так как клава скрыта, кнопка всегда тут: 86% X, 80% Y)
+            self._tap_percent(0.86, 0.80)
+            LOGGER.info("Tapped fallback coordinates for email submit")
 
     def fill_profile(self, first_name: str, last_name: str) -> None:
         """
