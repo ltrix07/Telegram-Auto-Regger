@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import os
@@ -256,6 +256,8 @@ class DeviceController:
         "mail",
         "\\u043f\\u043e\\u0447\\u0442",
         "@",
+        "choose a login email",
+        "login email",
     )
 
     def __init__(self, device_id: str, adb_path: str = "adb", require_root: bool = False) -> None:
@@ -1248,9 +1250,6 @@ class DeviceController:
     def input_email(self, email: str) -> None:
         """
         Input email on Telegram's email verification step (if requested).
-
-        Field identifiers vary across Telegram versions; this method uses
-        best-effort matching with a fallback tap.
         """
         LOGGER.info("Inputting email on Telegram UI")
         ui_ready = self.wait_for_ui_state(
@@ -1271,8 +1270,8 @@ class DeviceController:
         )
         if not tapped:
             if not self.wait_and_tap_by_text(self.EMAIL_FIELD_TEXT_CANDIDATES, timeout=3.0, reason="email field"):
-                # TODO: calibrate tap coordinates for email field if needed.
-                self._tap_percent(0.5, 0.42)
+                # Клик по обновленным координатам (поле почты находится в верхней трети экрана)
+                self._tap_percent(0.5, 0.33)
 
         self._input_text(email)
         if not self.wait_and_tap_resource(

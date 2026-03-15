@@ -508,6 +508,8 @@ def maybe_handle_email_step(device: DeviceController, email_api: Optional[EmailA
         "please enter your email",
         "e-mail address",
         "введите адрес",
+        "choose a login email",
+        "login email",
     )
     email_resource_markers = (
         "email_field",
