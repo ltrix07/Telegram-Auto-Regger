@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import os
@@ -1086,21 +1086,39 @@ class DeviceController:
 
     def input_phone(self, phone_number: str, country_code: Optional[str] = None) -> None:
         """
-        Best-effort fill Telegram phone form and continue.
+        Best-effort fill Telegram phone form and continue using Adaptive UI Polling.
         """
         LOGGER.info("Inputting phone number on Telegram UI")
-        self.wait_and_tap_by_text(self.START_MESSAGING_TEXT_CANDIDATES, timeout=10.0, reason="start messaging")
-        self.wait_and_tap_by_text(self.CONTINUE_TEXT_CANDIDATES, timeout=5.0, reason="continue")
-        self._tap_system_allow_button()
 
-        LOGGER.info("Waiting for phone UI to fully render...")
-        ui_ready = self.wait_for_ui_state(
-            resource_suffixes=self.PHONE_NUMBER_RESOURCE_ID_SUFFIXES,
-            text_candidates=("phone", "country", "\\u043d\\u043e\\u043c\\u0435\\u0440 \\u0442\\u0435\\u043b\\u0435\\u0444\\u043e\\u043d\\u0430"),
-            timeout=20.0,
+        # Adaptive UI Polling to reach the phone input screen
+        deadline = time.time() + 35.0
+        phone_screen_reached = False
+        phone_number_resources = (
+            *self.PHONE_COUNTRY_CODE_RESOURCE_ID_SUFFIXES,
+            *self.PHONE_NUMBER_RESOURCE_ID_SUFFIXES,
         )
-        if not ui_ready:
-            raise RuntimeError("Telegram UI failed to render phone input fields in time.")
+        phone_words = ("phone", "country", "\\u043d\\u043e\\u043c\\u0435\\u0440 \\u0442\\u0435\\u043b\\u0435\\u0444\\u043e\\u043d\\u0430")
+
+        while time.time() < deadline:
+            self.invalidate_ui_dump_cache()
+            xml_dump = self._get_cached_ui_xml()
+
+            # Check if we are on the right screen
+            if any(res in xml_dump for res in phone_number_resources) or \
+               any(word in xml_dump for word in phone_words):
+                LOGGER.info("Phone input screen reached.")
+                phone_screen_reached = True
+                break
+
+            # If not, try to unblock by tapping common buttons
+            self._safe_tap_by_text_candidates(self.START_MESSAGING_TEXT_CANDIDATES, reason="start messaging")
+            self._safe_tap_by_text_candidates(self.CONTINUE_TEXT_CANDIDATES, reason="continue")
+            self._tap_system_allow_button()
+
+            time.sleep(1.5)
+
+        if not phone_screen_reached:
+            self._dump_debug_info_and_raise("Telegram UI failed to reach phone input screen.")
 
         # Let the UI finish any subtle layout shifts.
         time.sleep(0.5)
@@ -1163,28 +1181,47 @@ class DeviceController:
             include_existing_account=True,
         )
         if not ui_next_ready:
-            LOGGER.warning("Timeout waiting for code/email screen. Forcing one last check.")
-            self._raise_for_auth_blockers(step_name="phone submission timeout", include_existing_account=True)
+            LOGGER.warning("Timeout waiting for code/email screen. Checking for blockers before failing.")
+            try:
+                self._raise_for_auth_blockers(step_name="phone submission timeout", include_existing_account=True)
+            except RuntimeError:
+                raise  # Re-raise specific blocker errors
+            self._dump_debug_info_and_raise("Failed to reach code/email screen after phone submission.")
 
         self._handle_post_action_popups(rounds=2, include_accept=False)
 
     def input_code(self, code: str) -> None:
         """
-        Input verification SMS code in Telegram.
+        Input verification SMS code in Telegram using Adaptive UI Polling.
         """
         LOGGER.info("Inputting SMS code on Telegram UI")
-        self._safe_tap_by_text_candidates(self.GET_CODE_VIA_SMS_TEXT_CANDIDATES, reason="request code via SMS")
 
-        ui_ready = self.wait_for_ui_state(
-            resource_suffixes=self.CODE_RESOURCE_ID_SUFFIXES,
-            text_candidates=self.CODE_TEXT_CANDIDATES,
-            timeout=15.0,
-            check_blockers=True,
-            step_name="code confirmation",
-            include_existing_account=False,
-        )
-        if not ui_ready:
-            raise RuntimeError("Telegram UI failed to render code input fields in time.")
+        deadline = time.time() + 25.0
+        code_screen_reached = False
+        while time.time() < deadline:
+            self.invalidate_ui_dump_cache()
+
+            # Check if we are on the right screen
+            xml_dump = self._get_cached_ui_xml()
+            if any(res in xml_dump for res in self.CODE_RESOURCE_ID_SUFFIXES) or \
+               self.screen_contains_any(self.CODE_TEXT_CANDIDATES):
+                LOGGER.info("Code input screen reached.")
+                code_screen_reached = True
+                break
+
+            # If not, try to get there by tapping "get code via SMS"
+            self._safe_tap_by_text_candidates(self.GET_CODE_VIA_SMS_TEXT_CANDIDATES, reason="request code via SMS")
+
+            # Also check for any blockers that might appear instead
+            try:
+                self._raise_for_auth_blockers(step_name="code input", include_existing_account=False)
+            except RuntimeError:
+                raise  # Re-raise blocker errors immediately
+
+            time.sleep(1.5)
+
+        if not code_screen_reached:
+            self._dump_debug_info_and_raise("Telegram UI failed to render code input fields in time.")
 
         time.sleep(1.0)
         self._input_text(str(code))
@@ -1225,7 +1262,7 @@ class DeviceController:
             include_existing_account=False,
         )
         if not ui_ready:
-            raise RuntimeError("Telegram UI failed to render email input field in time.")
+            self._dump_debug_info_and_raise("Telegram UI failed to render email input field in time.")
 
         tapped = self.wait_and_tap_resource(
             ("email", "login_email_field", "email_field"),
@@ -1261,7 +1298,7 @@ class DeviceController:
             include_existing_account=False,
         )
         if not ui_ready:
-            raise RuntimeError("Profile UI didn't fully render or stuck on previous step. Aborting to prevent blind typing.")
+            self._dump_debug_info_and_raise("Profile UI didn't fully render or stuck on previous step.")
 
         if self._safe_tap_telegram_resources(self.FIRST_NAME_RESOURCE_ID_SUFFIXES, reason="first name field"):
             self._input_text(first_name)
@@ -1312,8 +1349,8 @@ class DeviceController:
         return tapped
 
     def _tap_system_allow_button(self) -> bool:
+        self.invalidate_ui_dump_cache()
         for resource_id in self.ANDROID_ALLOW_RESOURCE_IDS:
-            self.invalidate_ui_dump_cache()
             if self._tap_by_resource_id(resource_id):
                 LOGGER.debug("Tapped Android allow button by resource-id `%s`", resource_id)
                 time.sleep(0.2)
@@ -1354,6 +1391,33 @@ class DeviceController:
                 break
                 
             time.sleep(0.05)
+
+    def _dump_debug_info_and_raise(self, error_message: str) -> None:
+        """
+        Save debug artifacts (screenshot, UI XML) and raise a RuntimeError.
+        """
+        timestamp = int(time.time())
+        self.debug_dir.mkdir(parents=True, exist_ok=True)
+        screenshot_path = self.debug_dir / f"ui_timeout_{timestamp}.png"
+        xml_path = self.debug_dir / f"ui_timeout_{timestamp}.xml"
+
+        LOGGER.error(
+            "%s. Saving debug screenshot to %s and UI XML to %s",
+            error_message,
+            screenshot_path,
+            xml_path,
+        )
+
+        self.take_screenshot(str(screenshot_path))
+        try:
+            # Use the already cached XML if available, otherwise dump fresh
+            xml_dump = self._ui_xml_cache or self._dump_ui_xml()
+            with open(xml_path, "w", encoding="utf-8") as f:
+                f.write(xml_dump)
+        except Exception as exc:
+            LOGGER.exception("Failed to save UI XML dump: %s", exc)
+
+        raise RuntimeError(f"{error_message} Saved debug screenshot and XML.")
 
     def _screen_contains_candidates(self, candidates: Iterable[str]) -> bool:
         self.invalidate_ui_dump_cache()
@@ -1483,7 +1547,7 @@ class DeviceController:
         """
         Check whether any substring appears in current UI dump text nodes.
         """
-        xml_text = self._dump_ui_xml()
+        xml_text = self._get_cached_ui_xml()
         text_candidates = " | ".join(self._extract_text_candidates(xml_text)).lower()
         return any(str(item).lower() in text_candidates for item in patterns)
 
@@ -1625,10 +1689,13 @@ class DeviceController:
             self.invalidate_ui_dump_cache()
 
             if check_blockers:
-                self._raise_for_auth_blockers(
-                    step_name=step_name,
-                    include_existing_account=include_existing_account,
-                )
+                try:
+                    self._raise_for_auth_blockers(
+                        step_name=step_name,
+                        include_existing_account=include_existing_account,
+                    )
+                except RuntimeError:
+                    raise # Propagate blocker exceptions immediately
 
             found_text = False
             found_resource = False
