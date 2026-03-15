@@ -949,16 +949,6 @@ def run_single_cycle(
 
         device.launch_telegram()
 
-        if not device.set_telegram_proxy_via_intent(
-            host=proxy_host,
-            port=int(proxy_port),
-            username=proxy_user,
-            password=proxy_password,
-        ):
-            raise RuntimeError(
-                f"Telegram proxy intent failed for {proxy_host}:{proxy_port} on {device_id}"
-            )
-
         _check_shutdown(stop_event)
 
         activation_id, phone_number = rent_number_with_retry(sms_api)

@@ -76,13 +76,6 @@ class TelegramRegistratorWithVideo(TelegramRegistrator):
                 # === ТУТ ВАШ UI-КОД ДЛЯ ВВОДА НОМЕРА ===
                 # Примерная последовательность на основе вашего скрипта registration.py
                 self.device_controller.cleanup_telegram()
-                if proxy_ip and proxy_port:
-                    self.device_controller.set_telegram_proxy_via_intent(
-                        host=proxy_ip,
-                        port=proxy_port,
-                        username=proxy_user,
-                        password=proxy_pass,
-                    )
                 self.device_controller.open_telegram()
                 self._ensure_telegram_opened()
 
