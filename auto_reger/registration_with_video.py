@@ -39,6 +39,8 @@ class TelegramRegistratorWithVideo(TelegramRegistrator):
         self,
         country_code: str,
         names_generator: Callable[[], Any] | Iterable[Any],
+        activation_id: str,
+        full_phone_number: str,
         proxy_ip: Optional[str] = None,
         proxy_port: Optional[int] = None,
         proxy_user: Optional[str] = None,
@@ -52,11 +54,10 @@ class TelegramRegistratorWithVideo(TelegramRegistrator):
         """
         # === ТУТ ЛОГИКА ПОДГОТОВКИ, аналог вашего register_account ===
         normalized_code = self._normalize_country_code(country_code)
-        
-        # Запрос номера телефона у SMS-сервиса (без UI-действий)
-        activation_id, full_phone_number = self._request_number(normalized_code)
+
+        # Номер уже предоставлен, используем его
         national_number = self._extract_local_number(full_phone_number, normalized_code)
-        
+
         # Создаем уникальные имена для видеофайлов
         timestamp = int(time.time())
         record_part1_path = self.video_output_dir / f"{full_phone_number}_{timestamp}_part1_request.mp4"

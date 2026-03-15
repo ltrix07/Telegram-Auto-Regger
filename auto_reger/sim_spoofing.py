@@ -61,3 +61,30 @@ def get_sim_env_for_country(country_code: str) -> Dict[str, str]:
         "SIM_ALPHA": profile["alpha"],
         "SIM_ISO": profile["iso"],
     }
+
+
+def get_operator_env(country_code: str, operator_name: str) -> dict[str, str]:
+    country = country_code.upper()
+    op = operator_name.lower().strip()
+
+    # Дефолтные значения (fallback)
+    env = {
+        "gsm.sim.state": "5",
+        "gsm.sim.operator.numeric": "310260",
+        "gsm.sim.operator.alpha": "T-Mobile",
+        "gsm.sim.operator.iso-country": "us",
+        "gsm.operator.numeric": "310260",
+        "gsm.operator.alpha": "T-Mobile",
+        "gsm.operator.iso-country": "us",
+    }
+
+    if country in ("US", "USA"):
+        if "tmobile" in op or "t-mobile" in op:
+            env.update({"gsm.sim.operator.numeric": "310260", "gsm.sim.operator.alpha": "T-Mobile", "gsm.operator.numeric": "310260", "gsm.operator.alpha": "T-Mobile"})
+        elif "att" in op or "at&t" in op:
+            env.update({"gsm.sim.operator.numeric": "310410", "gsm.sim.operator.alpha": "AT&T", "gsm.operator.numeric": "310410", "gsm.operator.alpha": "AT&T"})
+        elif "verizon" in op:
+            env.update({"gsm.sim.operator.numeric": "311480", "gsm.sim.operator.alpha": "Verizon", "gsm.operator.numeric": "311480", "gsm.operator.alpha": "Verizon"})
+
+    # Добавь поддержку других стран по мере необходимости (ID, GB и т.д.)
+    return env

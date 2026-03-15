@@ -24,6 +24,7 @@ from auto_reger.proxy_api import ProxyApi
 from auto_reger.session_generator import SessionGenerator
 from auto_reger.registration import TelegramRegistrator
 from auto_reger.registration_with_video import TelegramRegistratorWithVideo
+from auto_reger.sim_spoofing import get_operator_env
 from auto_reger.sms_api import (
     SmsApi,
     can_set_status_8,
@@ -334,18 +335,14 @@ def build_session_generator(
     )
 
 
-def extract_activation_and_phone(payload: Dict[str, Any]) -> Tuple[str, str]:
+def extract_activation_and_phone(payload: Dict[str, Any]) -> Tuple[str, str, str]:
     activation_id = str(payload.get("activationId") or payload.get("id") or "").strip()
-    phone_number = str(
-        payload.get("phoneNumber")
-        or payload.get("phone")
-        or payload.get("number")
-        or ""
-    ).strip()
+    phone_number = str(payload.get("phoneNumber") or payload.get("phone") or payload.get("number") or "").strip()
+    operator = str(payload.get("activationOperator") or "").strip().lower()
 
     if not activation_id or not phone_number:
         raise RuntimeError(f"Unexpected number payload from SMS provider: {payload!r}")
-    return activation_id, phone_number
+    return activation_id, phone_number, operator
 
 
 def load_profile_names() -> list[str]:
@@ -701,7 +698,7 @@ def safe_set_activation_done(sms_api: SmsApi, activation_id: str) -> None:
     )
 
 
-def rent_number_with_retry(sms_api: SmsApi) -> Tuple[str, str]:
+def rent_number_with_retry(sms_api: SmsApi) -> Tuple[str, str, str]:
     sms_cfg = CONFIG.get("sms_api", {})
     registration_cfg = CONFIG.get("registration", {})
     telegram_service_code = str(sms_cfg.get("telegram_service_code", "tg")).strip()
@@ -742,7 +739,7 @@ def rent_number_with_retry(sms_api: SmsApi) -> Tuple[str, str]:
         f"{max_price:.2f}" if max_price is not None else "none",
     )
 
-    def _rent_number() -> Tuple[str, str]:
+    def _rent_number() -> Tuple[str, str, str]:
         payload = sms_api.verification_number(
             service=telegram_service_code,
             country=country,
@@ -751,7 +748,7 @@ def rent_number_with_retry(sms_api: SmsApi) -> Tuple[str, str]:
         )
         return extract_activation_and_phone(payload)
 
-    activation_id, phone_number = retry_call(
+    activation_id, phone_number, operator_name = retry_call(
         operation="rent SMS number",
         func=_rent_number,
         attempts=4,
@@ -759,7 +756,7 @@ def rent_number_with_retry(sms_api: SmsApi) -> Tuple[str, str]:
     )
 
     save_activation_to_json(activation_id=activation_id, phone_number=phone_number)
-    return activation_id, phone_number
+    return activation_id, phone_number, operator_name
 
 
 def wait_sms_code(sms_api: SmsApi, activation_id: str) -> str:
@@ -946,12 +943,26 @@ def run_single_cycle(
         if not proxy_data:
             raise RuntimeError(f"Proxy is required but none returned for country={country}.")
 
+        activation_id, phone_number, operator_name = rent_number_with_retry(sms_api)
+        register_active_activation(activation_id, phone_number, device_id)
+        LOGGER.info(
+            "Rented number %s (activation_id=%s, operator=%s) for cycle %s on %s",
+            phone_number,
+            activation_id,
+            operator_name,
+            cycle_index,
+            device_id,
+        )
+
+        operator_env = get_operator_env(country, operator_name)
+        LOGGER.info("Generated operator env for %s: %s", operator_name, operator_env)
+
         proxy_host = str(proxy_data.get("ip", "")).strip()
         proxy_port = str(proxy_data.get("port", "")).strip()
         proxy_user = str(proxy_data.get("user", "")).strip()
         proxy_password = str(proxy_data.get("pass", "")).strip()
         proxy_type = str(proxy_data.get("type", "")).strip().lower()
-        
+
         if proxy_type != "socks5":
             raise RuntimeError(f"Proxy must be SOCKS5 for tun2socks. Got type={proxy_type!r}")
 
@@ -965,10 +976,11 @@ def run_single_cycle(
         device_profile = random.choice(DEVICE_PROFILES)
         LOGGER.info("Selected device profile: %s", device_profile.get("ro.product.model"))
         extra_env = {"PROXY_URL": tun2socks_url}
+        extra_env.update(operator_env)
         extra_env.update(device_profile)
 
         LOGGER.info(
-            "Cycle %s/%s starting fresh Docker Android container with proxy rotation",
+            "Cycle %s/%s starting fresh Docker Android container with proxy and operator spoofing",
             cycle_index,
             total_cycles,
         )
@@ -983,7 +995,7 @@ def run_single_cycle(
                 docker_controller.install_apk(device_id, apk_path=webview_path)
             else:
                 LOGGER.warning("webview.apk not found in /app! Anti-fraud trust might be lower.")
-            
+
             docker_controller.install_apk(device_id, apk_path="/app/telegram.apk")
         except Exception:
             LOGGER.critical(
@@ -1017,16 +1029,6 @@ def run_single_cycle(
         device.launch_telegram()
 
         _check_shutdown(stop_event)
-
-        activation_id, phone_number = rent_number_with_retry(sms_api)
-        register_active_activation(activation_id, phone_number, device_id)
-        LOGGER.info(
-            "Rented number %s (activation_id=%s) for cycle %s on %s",
-            phone_number,
-            activation_id,
-            cycle_index,
-            device_id,
-        )
 
         phone_digits = re.sub(r"\D", "", phone_number)
         country_guess = f"+{phone_digits[:-10]}" if len(phone_digits) > 10 else None
@@ -1243,6 +1245,20 @@ def run_single_cycle_with_video(
         _check_shutdown(stop_event)
 
         country = str(CONFIG.get("registration", {}).get("default_country", "US")).strip() or "US"
+        
+        activation_id, phone_number, operator_name = rent_number_with_retry(sms_api)
+        LOGGER.info(
+            "Rented number %s (activation_id=%s, operator=%s) for cycle %s on %s",
+            phone_number,
+            activation_id,
+            operator_name,
+            cycle_index,
+            device_id,
+        )
+
+        operator_env = get_operator_env(country, operator_name)
+        LOGGER.info("Generated operator env for %s: %s", operator_name, operator_env)
+
         proxy_data = proxy_api.get_proxy(country_code=country)
         if not proxy_data:
             raise RuntimeError(f"Proxy is required but none returned for country={country}.")
@@ -1264,6 +1280,7 @@ def run_single_cycle_with_video(
         device_profile = random.choice(DEVICE_PROFILES)
         LOGGER.info("Selected device profile: %s", device_profile.get("ro.product.model"))
         extra_env = {"PROXY_URL": tun2socks_url}
+        extra_env.update(operator_env)
         extra_env.update(device_profile)
 
         docker_controller.start_container(extra_env=extra_env)
@@ -1307,6 +1324,8 @@ def run_single_cycle_with_video(
         # Запускаем весь процесс через один метод
         reg_result = video_registrator.register_account_with_video(
             country_code=country,
+            activation_id=activation_id,
+            full_phone_number=phone_number,
             names_generator=lambda: {"first_name": f"user{random.randint(1000, 9999)}", "last_name": random.choice(last_names)},
             proxy_ip=proxy_host,
             proxy_port=int(proxy_port),

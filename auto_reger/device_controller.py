@@ -585,10 +585,12 @@ class DeviceController:
             else:
                 raise RuntimeError(f"ADB device {self.device_id} failed to reach stable `device` state")
         self._ensure_root_access()
-        # Принудительная зарядка устройства до 100% (требует root)
-        self._adb("shell", "dumpsys", "battery", "set", "ac", "1", check=False)
-        self._adb("shell", "dumpsys", "battery", "set", "status", "2", check=False)
-        self._adb("shell", "dumpsys", "battery", "set", "level", "100", check=False)
+        # Рандомизация состояния батареи
+        battery_level = random.randint(45, 85)
+        # Отключаем от розетки (ac=0), статус 3 (Discharging)
+        self._adb("shell", "dumpsys", "battery", "set", "ac", "0", check=False)
+        self._adb("shell", "dumpsys", "battery", "set", "status", "3", check=False)
+        self._adb("shell", "dumpsys", "battery", "set", "level", str(battery_level), check=False)
         self.u2_client = u2.connect(self.device_id)
 
     def is_ready(self) -> bool:
@@ -1885,7 +1887,8 @@ class DeviceController:
         return ""
 
     def _tap(self, x: int, y: int) -> None:
-        self.u2_client.click(x, y)
+        duration = random.randint(50, 150)
+        self._adb("shell", "input", "swipe", str(x), str(y), str(x), str(y), str(duration), check=False)
         self.invalidate_ui_dump_cache()
 
     def _tap_percent(self, x_percent: float, y_percent: float) -> None:
