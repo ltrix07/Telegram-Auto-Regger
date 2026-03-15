@@ -10,6 +10,9 @@ services:
       - /dev/net/tun:/dev/net/tun
     ports:
       - "5555:5555"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     healthcheck:
       test: ["CMD-SHELL", "pgrep tun2socks"]
       interval: 10s
@@ -25,11 +28,6 @@ services:
     depends_on:
       - tun2socks_1
     network_mode: "service:tun2socks_1"
-    
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
-    
     command:
       - androidboot.redroid_width=720
       - androidboot.redroid_height=1280
