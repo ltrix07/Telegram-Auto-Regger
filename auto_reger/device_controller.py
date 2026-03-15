@@ -873,7 +873,8 @@ class DeviceController:
 
     def launch_telegram(self) -> None:
         """
-        Launch official Telegram or fork app using uiautomator2 for maximum reliability.
+        Launch official Telegram using aggressive am start (for Android 11 background bypass)
+        and uiautomator2 for UI detection.
         """
         LOGGER.info("Launching Telegram on %s", self.device_id)
         self.invalidate_ui_dump_cache()
@@ -882,11 +883,25 @@ class DeviceController:
         if self.u2_client is None:
             self.u2_client = u2.connect(self.device_id)
 
+        activity_suffix = ".ui.LaunchActivity"
+        if self.telegram_package == "org.thunderdog.challegram":
+            activity_suffix = ".MainActivity"
+            
+        component_name = f"{self.telegram_package}/{activity_suffix}"
+
+        # Агрессивная команда запуска специально для Redroid 11
+        launch_cmd = [
+            "shell", "am", "start", "-W", "-n", component_name,
+            "-a", "android.intent.action.MAIN",
+            "-c", "android.intent.category.LAUNCHER",
+            "--windowingMode", "1"
+        ]
+        
         try:
-            self.u2_client.app_start(self.telegram_package, stop=True)
+            self._adb(*launch_cmd, check=False)
         except Exception as e:
-            LOGGER.error("uiautomator2 app_start failed, falling back to monkey: %s", e)
-            self._adb("shell", "monkey", "-p", self.telegram_package, "-c", "android.intent.category.LAUNCHER", "1", check=False)
+            LOGGER.warning("am start failed: %s. Falling back to u2 app_start.", e)
+            self.u2_client.app_start(self.telegram_package, stop=True)
 
         LOGGER.info("Waiting for app interface to load (first launch may take 60+ seconds)...")
         deadline = time.time() + 60.0
@@ -900,8 +915,14 @@ class DeviceController:
             time.sleep(1.5)
 
         if not app_ready:
+            # Делаем скриншот, чтобы увидеть, на чем завис экран!
+            import os
+            debug_path = os.path.join(self.debug_dir, f"timeout_launch_{int(time.time())}.png")
+            self.take_screenshot(debug_path)
+            
             raise RuntimeError(
-                "App load timeout: Telegram UI failed to render. (Possible APK architecture mismatch - ensure you use x86_64 or Universal APK)."
+                f"App load timeout: Telegram UI failed to render. "
+                f"Saved debug screenshot to {debug_path}"
             )
         else:
             LOGGER.info("Telegram interface successfully loaded and is ready for proxy setup.")
