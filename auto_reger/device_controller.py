@@ -585,10 +585,11 @@ class DeviceController:
             else:
                 raise RuntimeError(f"ADB device {self.device_id} failed to reach stable `device` state")
         self._ensure_root_access()
-        self.u2_client = u2.connect(self.device_id)
-
-        self._adb("shell", "dumpsys", "battery", "set", "level", "100", check=False)
+        # Принудительная зарядка устройства до 100% (требует root)
+        self._adb("shell", "dumpsys", "battery", "set", "ac", "1", check=False)
         self._adb("shell", "dumpsys", "battery", "set", "status", "2", check=False)
+        self._adb("shell", "dumpsys", "battery", "set", "level", "100", check=False)
+        self.u2_client = u2.connect(self.device_id)
 
     def is_ready(self) -> bool:
         """
@@ -888,8 +889,6 @@ class DeviceController:
         and using aggressive foreground start flags for Android 11+.
         """
         LOGGER.info("Launching Telegram on %s", self.device_id)
-        self._adb("shell", "dumpsys", "battery", "set", "level", "100", check=False)
-        self._adb("shell", "dumpsys", "battery", "set", "status", "2", check=False)
         self.invalidate_ui_dump_cache()
         time.sleep(3.0)
 
@@ -1130,7 +1129,7 @@ class DeviceController:
             # If not, try to unblock by tapping common buttons.
             # Step 2: Dismiss various system popups that might block the main flow.
             self._safe_tap_by_text_candidates(
-                ["ok", "close", "cancel", "disable", "закрыть", "понятно", "отмена"],
+                ["ok", "close", "cancel", "закрыть", "понятно", "отмена"],
                 reason="dismiss system popup"
             )
             self._safe_tap_by_text_candidates(self.CONTINUE_TEXT_CANDIDATES, reason="continue")
