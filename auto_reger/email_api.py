@@ -175,7 +175,7 @@ class EmailApi:
                 time.sleep(sleep_seconds)
 
         self._safe_logout(imap_client)
-        raise TimeoutError(f"No Telegram email code received for {normalized_email} in {timeout}s.")
+        raise TimeoutError(f"No Telegram email code received for {normalized_email}:{password} in {timeout}s.")
 
     def _resolve_imap_server(self, email_address: str) -> str:
         domain = email_address.split("@", 1)[1].lower()
