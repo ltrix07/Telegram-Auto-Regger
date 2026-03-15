@@ -626,6 +626,7 @@ def maybe_handle_email_step(device: DeviceController, email_api: Optional[EmailA
         email_code = email_api.wait_for_email_code(email_address=email_address, password=email_password, timeout=120)
         LOGGER.info("Submitting email verification code for %s", email_address)
         device.input_code(email_code)
+        time.sleep(random.uniform(2.5, 4.0))
     except NoEmailsLeftError as exc:
         LOGGER.error("No emails left: %s", exc)
         return
@@ -739,24 +740,44 @@ def rent_number_with_retry(sms_api: SmsApi) -> Tuple[str, str, str]:
         f"{max_price:.2f}" if max_price is not None else "none",
     )
 
-    def _rent_number() -> Tuple[str, str, str]:
-        payload = sms_api.verification_number(
-            service=telegram_service_code,
-            country=country,
-            max_price=max_price,
-            country_id=country_id,
-        )
-        return extract_activation_and_phone(payload)
+    BANNED_OPERATORS = ["textnow", "virtual", "google voice"]
 
-    activation_id, phone_number, operator_name = retry_call(
-        operation="rent SMS number",
-        func=_rent_number,
-        attempts=4,
-        initial_delay=2.0,
-    )
+    while True:
+        _check_shutdown(STOP_EVENT)
+        activation_id, phone_number, operator_name = "", "", ""
+        try:
+            payload = sms_api.verification_number(
+                service=telegram_service_code,
+                country=country,
+                max_price=max_price,
+                country_id=country_id,
+            )
+            activation_id, phone_number, operator_name = extract_activation_and_phone(payload)
 
-    save_activation_to_json(activation_id=activation_id, phone_number=phone_number)
-    return activation_id, phone_number, operator_name
+            if operator_name and operator_name in BANNED_OPERATORS:
+                LOGGER.warning(
+                    "Operator '%s' is banned (TextNow/VoIP), cancelling and retrying...",
+                    operator_name,
+                )
+                try:
+                    sms_api.setStatus(activation_id, status=8)
+                    LOGGER.info("Cancelled activation %s for banned operator %s", activation_id, operator_name)
+                except Exception as e:
+                    LOGGER.error("Failed to cancel activation %s for banned operator: %s", activation_id, e)
+                time.sleep(3.0)
+                continue
+
+            save_activation_to_json(activation_id=activation_id, phone_number=phone_number)
+            return activation_id, phone_number, operator_name
+
+        except Exception as e:
+            LOGGER.warning("Rent number failed: %s. Retrying in 5s", e)
+            if activation_id:
+                try:
+                    sms_api.setStatus(activation_id, status=8)
+                except Exception:
+                    pass  # Ignore errors during cleanup
+            time.sleep(5.0)
 
 
 def wait_sms_code(sms_api: SmsApi, activation_id: str) -> str:

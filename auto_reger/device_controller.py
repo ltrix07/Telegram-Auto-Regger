@@ -900,14 +900,21 @@ class DeviceController:
         # 1. Динамически узнаем реальное имя установленного пакета
         installed_pkgs = self._adb("shell", "pm", "list", "packages", check=False).stdout
         
-        if "package:org.telegram.messenger.web" in installed_pkgs:
-            self.telegram_package = "org.telegram.messenger.web"
-        elif "package:org.telegram.messenger" in installed_pkgs:
+        # Prioritize official org.telegram.messenger from Google Play
+        if "package:org.telegram.messenger" in installed_pkgs:
             self.telegram_package = "org.telegram.messenger"
-        elif "package:org.thunderdog.challegram" in installed_pkgs:
-            self.telegram_package = "org.thunderdog.challegram"
+        elif "package:org.telegram.messenger.web" in installed_pkgs:
+            self.telegram_package = "org.telegram.messenger.web"
         else:
-            LOGGER.error("No known Telegram package found in 'pm list packages'!")
+            # Fallback to find any known candidate
+            found = False
+            for pkg_candidate in self.TELEGRAM_PACKAGE_CANDIDATES:
+                if f"package:{pkg_candidate}" in installed_pkgs:
+                    self.telegram_package = pkg_candidate
+                    found = True
+                    break
+            if not found:
+                 LOGGER.error("No known Telegram package found in 'pm list packages'!")
             
         LOGGER.info("Dynamically set Telegram package to: %s", self.telegram_package)
 
@@ -1255,7 +1262,8 @@ class DeviceController:
         time.sleep(1.0)
         self.human_typing(str(code))
 
-        time.sleep(0.5)
+        time.sleep(random.uniform(4.0, 6.5))
+
         next_btn_resources = ("login_btn", "next_button", "done_button", "ok_button", "floating_button", "fab")
         if not self.wait_and_tap_resource(next_btn_resources, timeout=4.0, reason="submit code"):
             if not self.wait_and_tap_by_text(self.NEXT_DONE_TEXT_CANDIDATES, timeout=2.0, reason="submit code"):
@@ -1921,9 +1929,10 @@ class DeviceController:
         """
         Warm up the emulator by adding fake contacts to the contact list.
         """
-        LOGGER.info("Warming up emulator: adding fake contacts")
-        self._adb("shell", "pm", "grant", "org.telegram.messenger.web", "android.permission.READ_CONTACTS", check=False)
-        
+        LOGGER.info("Warming up emulator: adding 15 fake contacts")
+        self._adb("shell", "pm", "grant", self.telegram_package, "android.permission.READ_CONTACTS", check=False)
+        self._adb("shell", "pm", "grant", self.telegram_package, "android.permission.WRITE_CONTACTS", check=False)
+
         contacts = [
             ("John", "Smith", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
             ("Alice", "Johnson", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
@@ -1935,6 +1944,11 @@ class DeviceController:
             ("Christopher", "Davis", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
             ("Ashley", "Rodriguez", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
             ("Matthew", "Martinez", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
+            ("Emily", "Taylor", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
+            ("Daniel", "Anderson", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
+            ("Olivia", "Thomas", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
+            ("James", "Hernandez", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
+            ("Sophia", "Moore", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
         ]
 
         for first_name, last_name, phone_number in contacts:
@@ -1964,6 +1978,7 @@ class DeviceController:
                     "--bind", "data2:i:2"  # Type: Mobile
                 )
                 LOGGER.info(f"Added contact: {first_name} {last_name} ({phone_number})")
+                time.sleep(random.uniform(0.6, 1.3))
             except Exception as e:
                 LOGGER.error(f"Failed to add contact {first_name} {last_name}: {e}")
 
