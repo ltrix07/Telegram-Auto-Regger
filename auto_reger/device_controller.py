@@ -915,14 +915,26 @@ class DeviceController:
             time.sleep(1.5)
 
         if not app_ready:
-            # Делаем скриншот, чтобы увидеть, на чем завис экран!
             import os
-            debug_path = os.path.join(self.debug_dir, f"timeout_launch_{int(time.time())}.png")
-            self.take_screenshot(debug_path)
+            timestamp = int(time.time())
+            debug_img_path = os.path.join(self.debug_dir, f"timeout_launch_{timestamp}.png")
+            debug_log_path = os.path.join(self.debug_dir, f"timeout_launch_{timestamp}_logcat.txt")
             
+            # 1. Сохраняем скриншот
+            self.take_screenshot(debug_img_path)
+            
+            # 2. Вытягиваем системные логи (краши, ошибки Java/C++)
+            try:
+                logcat_data = self._adb("shell", "logcat", "-d", "-b", "crash,main,system", timeout=15).stdout
+                with open(debug_log_path, "w", encoding="utf-8") as f:
+                    f.write(logcat_data)
+            except Exception as e:
+                LOGGER.error(f"Failed to dump logcat: {e}")
+                
             raise RuntimeError(
-                f"App load timeout: Telegram UI failed to render. "
-                f"Saved debug screenshot to {debug_path}"
+                f"App load timeout: Telegram UI failed to render.\n"
+                f"Saved screenshot: {debug_img_path}\n"
+                f"Saved crash log: {debug_log_path}"
             )
         else:
             LOGGER.info("Telegram interface successfully loaded and is ready for proxy setup.")
