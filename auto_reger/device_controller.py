@@ -581,6 +581,9 @@ class DeviceController:
         self._ensure_root_access()
         self.u2_client = u2.connect(self.device_id)
 
+        self._adb("shell", "dumpsys", "battery", "set", "level", "100", check=False)
+        self._adb("shell", "dumpsys", "battery", "set", "status", "2", check=False)
+
     def is_ready(self) -> bool:
         """
         Verify core readiness for headless execution:
@@ -1099,11 +1102,14 @@ class DeviceController:
             *self.PHONE_COUNTRY_CODE_RESOURCE_ID_SUFFIXES,
             *self.PHONE_NUMBER_RESOURCE_ID_SUFFIXES,
         )
-        phone_words = ("phone", "country", "mobile", "номер телефона", "your phone")
+        phone_words = (
+            "phone", "country", "mobile", "number", 
+            "телефон", "номер", "страна", 
+            "telefon", "numer", "kraj"
+        )
 
         while time.time() < deadline:
             self.invalidate_ui_dump_cache()
-            # ПЕРЕВОДИМ ВЕСЬ ДАМП В НИЖНИЙ РЕГИСТР:
             xml_dump = self._get_cached_ui_xml().lower()
 
             # Check if we are on the right screen
@@ -1168,7 +1174,7 @@ class DeviceController:
             self._adb("shell", "input", "keyevent", "66", check=False)  # KEYCODE_ENTER
             self.invalidate_ui_dump_cache()
 
-        self._safe_tap_by_text_candidates(["yes", "\\u0434\\u0430"], reason="confirm phone number")
+        self._safe_tap_by_text_candidates(["yes", "да", "tak", "ok", "confirm", "подтвердить"], reason="confirm phone number")
 
         LOGGER.info("Waiting for code/email screen after phone submission...")
         ui_next_ready = self.wait_for_ui_state(
