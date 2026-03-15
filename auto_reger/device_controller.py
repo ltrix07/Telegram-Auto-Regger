@@ -1176,8 +1176,15 @@ class DeviceController:
                 "email_field",
                 "login_email_field",
             ),
-            # ДОБАВЛЕНЫ НОВЫЕ ТЕКСТЫ СЮДА:
-            text_candidates=("your email address", "please enter your email", "choose a login email", "login email"),
+            # ДОБАВЬ НОВЫЕ ТЕКСТЫ СЮДА:
+            text_candidates=(
+                "your email address", 
+                "please enter your email", 
+                "choose a login email", 
+                "login email",
+                "add email",                 
+                "valid email address"        
+            ),
             timeout=25.0,
             check_blockers=True,
             step_name="phone submission",

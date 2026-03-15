@@ -22,7 +22,7 @@ from auto_reger.email_api import EmailApi, EmailAuthorizationError, NoEmailsLeft
 from auto_reger.notifier import TelegramNotifier
 from auto_reger.proxy_api import ProxyApi
 from auto_reger.session_generator import SessionGenerator
-from auto_reger.registration import TelegramRegistrator, RegistrationError
+from auto_reger.registration import TelegramRegistrator
 from auto_reger.registration_with_video import TelegramRegistratorWithVideo
 from auto_reger.sms_api import (
     SmsApi,
@@ -510,6 +510,8 @@ def maybe_handle_email_step(device: DeviceController, email_api: Optional[EmailA
         "введите адрес",
         "choose a login email",
         "login email",
+        "add email",             
+        "valid email address",  
     )
     email_resource_markers = (
         "email_field",
@@ -556,20 +558,9 @@ def maybe_handle_email_step(device: DeviceController, email_api: Optional[EmailA
     email_address: Optional[str] = None
     try:
         email_address, email_password = email_api.get_email()
-        LOGGER.info("Inputting email to Telegram: %s", email_address)
+        LOGGER.info("Inputting email to Telegram: %s:%s", email_address, email_password)
         device.input_email(email_address)
-        try:
-            email_code = email_api.wait_for_email_code(email_address=email_address, password=email_password, timeout=120)
-        except TimeoutError as e:
-            import time
-            import os
-            debug_path = os.path.join(device.debug_dir, f"timeout_email_code_{int(time.time())}.png")
-            device.take_screenshot(debug_path)
-            try:
-                device._dump_ui_xml(debug_path.replace('.png', '.xml'))
-            except Exception:
-                pass
-            raise RuntimeError(f"Screen state saved to {debug_path}. Original error: {e}")
+        email_code = email_api.wait_for_email_code(email_address=email_address, password=email_password, timeout=120)
         LOGGER.info("Submitting email verification code for %s", email_address)
         device.input_code(email_code)
     except NoEmailsLeftError as exc:
@@ -982,15 +973,7 @@ def run_single_cycle(
 
         sms_code = wait_sms_code(sms_api, activation_id=activation_id)
         if not sms_code:
-            import time
-            import os
-            debug_path = os.path.join(device.debug_dir, f"timeout_sms_code_{int(time.time())}.png")
-            device.take_screenshot(debug_path)
-            try:
-                device._dump_ui_xml(debug_path.replace('.png', '.xml'))
-            except Exception:
-                pass
-            raise RuntimeError(f"Screen state saved to {debug_path}. Original error: SMS code not received from provider.")
+            raise RuntimeError("SMS code not received from provider.")
 
         _check_shutdown(stop_event)
 
@@ -1233,28 +1216,14 @@ def run_single_cycle_with_video(
         )
         
         # Запускаем весь процесс через один метод
-        try:
-            reg_result = video_registrator.register_account_with_video(
-                country_code=country,
-                names_generator=lambda: {"first_name": f"user{random.randint(1000, 9999)}", "last_name": random.choice(last_names)},
-                proxy_ip=proxy_host,
-                proxy_port=int(proxy_port),
-                proxy_user=proxy_user,
-                proxy_pass=proxy_password,
-            )
-        except RegistrationError as e:
-            if "SMS code was not received" in str(e):
-                import time
-                import os
-                debug_path = os.path.join(device.debug_dir, f"timeout_sms_code_{int(time.time())}.png")
-                device.take_screenshot(debug_path)
-                try:
-                    device._dump_ui_xml(debug_path.replace('.png', '.xml'))
-                except Exception:
-                    pass
-                raise RuntimeError(f"Screen state saved to {debug_path}. Original error: {e}") from e
-            else:
-                raise e
+        reg_result = video_registrator.register_account_with_video(
+            country_code=country,
+            names_generator=lambda: {"first_name": f"user{random.randint(1000, 9999)}", "last_name": random.choice(last_names)},
+            proxy_ip=proxy_host,
+            proxy_port=int(proxy_port),
+            proxy_user=proxy_user,
+            proxy_pass=proxy_password,
+        )
         
         phone_number = reg_result["phone_number"]
         activation_id = reg_result["activation_id"]
