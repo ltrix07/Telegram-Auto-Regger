@@ -1299,13 +1299,16 @@ class DeviceController:
                 self._tap_percent(0.5, 0.33)
 
         self.human_typing(email)
-        if not self.wait_and_tap_resource(
-            ("login_btn", "next_button", "done_button", "ok_button"),
-            timeout=6.0,
-            reason="submit email",
-        ):
-            self.wait_and_tap_by_text(self.NEXT_DONE_TEXT_CANDIDATES, timeout=3.0, reason="submit email")
-            self._adb("shell", "input", "keyevent", "66", check=False)
+        # 1. Сначала пробуем нажать "Enter" на системной клавиатуре Android (KeyCode 66)
+        self._adb("shell", "input", "keyevent", "66", check=False)
+        time.sleep(1.0)
+        
+        # 2. Пробуем кликнуть по текстовым кнопкам, если они есть
+        self._safe_tap_by_text_candidates(["done", "submit", "next", "далее", "готово", "продолжить"], reason="submit email")
+        
+        # 3. Слепой клик по Floating Action Button (синяя круглая кнопка со стрелочкой) 
+        # Она обычно находится внизу справа, над клавиатурой (примерно 85% по X и 80% по Y)
+        self._tap_percent(0.85, 0.80)
 
         self._handle_post_action_popups(rounds=2, include_accept=False)
 
