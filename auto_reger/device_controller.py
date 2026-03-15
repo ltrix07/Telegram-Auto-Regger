@@ -1099,11 +1099,12 @@ class DeviceController:
             *self.PHONE_COUNTRY_CODE_RESOURCE_ID_SUFFIXES,
             *self.PHONE_NUMBER_RESOURCE_ID_SUFFIXES,
         )
-        phone_words = ("phone", "country", "\\u043d\\u043e\\u043c\\u0435\\u0440 \\u0442\\u0435\\u043b\\u0435\\u0444\\u043e\\u043d\\u0430")
+        phone_words = ("phone", "country", "mobile", "номер телефона", "your phone")
 
         while time.time() < deadline:
             self.invalidate_ui_dump_cache()
-            xml_dump = self._get_cached_ui_xml()
+            # ПЕРЕВОДИМ ВЕСЬ ДАМП В НИЖНИЙ РЕГИСТР:
+            xml_dump = self._get_cached_ui_xml().lower()
 
             # Check if we are on the right screen
             if any(res in xml_dump for res in phone_number_resources) or \
