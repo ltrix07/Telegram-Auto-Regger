@@ -55,8 +55,6 @@ services:
 
       # --- Базовые системные настройки ---
       - ro.kernel.qemu=0
-      - ro.hardware.egl=adreno
-      - ro.hardware.vulkan=adreno
       - redroid.prop.ro.secure=0
       - redroid.prop.ro.debuggable=1
 
