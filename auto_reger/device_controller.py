@@ -1776,13 +1776,28 @@ class DeviceController:
 
     @staticmethod
     def _parse_bounds(bounds: str) -> Optional[Tuple[int, int]]:
-        match = re.match(r"\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]", bounds or "")
+        import random
+        # Исправленная регулярка: одинарные слеши для экранирования скобок
+        match = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds or "")
         if not match:
             return None
+            
         left, top, right, bottom = map(int, match.groups())
-        center_x = (left + right) // 2
-        center_y = (top + bottom) // 2
-        return center_x, center_y
+        width = right - left
+        height = bottom - top
+        
+        if width <= 0 or height <= 0:
+            return left, top
+            
+        # Умный клик: берем центр и добавляем случайное смещение (до 30% от размера в каждую сторону).
+        # Таким образом мы кликаем в безопасную центральную зону (60% площади), но никогда не в один и тот же пиксель.
+        offset_x = random.randint(int(-width * 0.3), int(width * 0.3))
+        offset_y = random.randint(int(-height * 0.3), int(height * 0.3))
+        
+        click_x = (left + right) // 2 + offset_x
+        click_y = (top + bottom) // 2 + offset_y
+        
+        return click_x, click_y
 
     def _tap_by_text_candidates(self, candidates: Iterable[str]) -> bool:
         root = self._get_cached_ui_root()
