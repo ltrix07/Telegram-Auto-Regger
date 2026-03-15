@@ -21,7 +21,7 @@ services:
     restart: unless-stopped
 
   android_1:
-    image: redroid/redroid:11.0.0-gapps
+    image: redroid/redroid:11.0.0-latest
     container_name: android_1
     privileged: true
     shm_size: '2gb'
