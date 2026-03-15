@@ -880,6 +880,20 @@ class DeviceController:
         self.invalidate_ui_dump_cache()
         time.sleep(3.0)
 
+        # Динамически узнаем реальное имя установленного пакета Telegram
+        installed_pkgs = self._adb("shell", "pm", "list", "packages", check=False).stdout
+        
+        if "package:org.telegram.messenger.web" in installed_pkgs:
+            self.telegram_package = "org.telegram.messenger.web"
+        elif "package:org.telegram.messenger" in installed_pkgs:
+            self.telegram_package = "org.telegram.messenger"
+        elif "package:org.thunderdog.challegram" in installed_pkgs:
+            self.telegram_package = "org.thunderdog.challegram"
+        else:
+            LOGGER.error("No known Telegram package found in 'pm list packages'!")
+            
+        LOGGER.info("Dynamically set Telegram package to: %s", self.telegram_package)
+
         if self.u2_client is None:
             self.u2_client = u2.connect(self.device_id)
 
