@@ -43,8 +43,8 @@ ALERT_SEND_LOCK = threading.Lock()
 
 ROUTINE_ALERT_SKIP_PATTERNS: tuple[str, ...] = (
     "sms status polling failed",
-    "sms code not received",
-    "wait sms code",
+    # "sms code not received",
+    # "wait sms code",
     "rent sms number failed",
     "no free numbers",
     "no_numbers",
@@ -971,15 +971,23 @@ def run_single_cycle(
         device.input_phone(phone_number=phone_number, country_code=country_guess)
         maybe_handle_email_step(device=device, email_api=email_api)
 
+        # ПЕРЕНЕСЛИ СЮДА: Начинаем запись ДО ожидания кода
+        LOGGER.info("Starting screenrecord BEFORE waiting for SMS code")
+        record_proc = device.start_recording(remote_video_path)
+
         sms_code = wait_sms_code(sms_api, activation_id=activation_id)
         if not sms_code:
-            raise RuntimeError("SMS code not received from provider.")
+            import time
+            import os
+            debug_path = os.path.join(device.debug_dir, f"timeout_sms_code_{int(time.time())}.png")
+            device.take_screenshot(debug_path)
+            try:
+                device._dump_ui_xml(debug_path.replace('.png', '.xml'))
+            except Exception:
+                pass
+            raise RuntimeError(f"Screen state saved to {debug_path}. Original error: SMS code not received from provider.")
 
         _check_shutdown(stop_event)
-
-        # Начинаем запись только после получения кода, чтобы уложиться в 3 минуты
-        LOGGER.info("Starting screenrecord after receiving SMS code")
-        record_proc = device.start_recording(remote_video_path)
 
         device.input_code(sms_code)
         maybe_fill_profile_step(device=device, last_names=last_names)
