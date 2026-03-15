@@ -41,6 +41,7 @@ ACTIVE_ACTIVATIONS: dict[str, dict[str, str]] = {}
 ALERT_RATE_LIMIT_LOCK = threading.Lock()
 LAST_CYCLE_ALERT_AT: dict[str, float] = {}
 ALERT_SEND_LOCK = threading.Lock()
+ALLOWED_OPERATORS = "tmobile,att,verizon,lycamobile,sprint"
 
 DEVICE_PROFILES = [
     {
@@ -704,23 +705,13 @@ def rent_number_with_retry(sms_api: SmsApi) -> Tuple[str, str, str]:
     registration_cfg = CONFIG.get("registration", {})
     telegram_service_code = str(sms_cfg.get("telegram_service_code", "tg")).strip()
     country = str(registration_cfg.get("default_country", "USA")).strip()
+    
+    # Берем макс. цену
     max_price_raw = sms_cfg.get("max_price", registration_cfg.get("default_max_price"))
     try:
         max_price = float(max_price_raw) if max_price_raw is not None else None
     except (TypeError, ValueError):
-        LOGGER.warning(
-            "Invalid max price in config (sms_api.max_price=%r), falling back to registration.default_max_price",
-            max_price_raw,
-        )
-        fallback_price = registration_cfg.get("default_max_price")
-        try:
-            max_price = float(fallback_price) if fallback_price is not None else None
-        except (TypeError, ValueError):
-            LOGGER.warning(
-                "Invalid registration.default_max_price=%r. Sending request without max price limit.",
-                fallback_price,
-            )
-            max_price = None
+        max_price = None
 
     country_id_raw = sms_cfg.get("country_id")
     country_id: Optional[int] = None
@@ -728,55 +719,40 @@ def rent_number_with_retry(sms_api: SmsApi) -> Tuple[str, str, str]:
         try:
             country_id = int(country_id_raw)
         except (TypeError, ValueError):
-            LOGGER.warning(
-                "Invalid sms_api.country_id=%r. Falling back to country name resolution for %s.",
-                country_id_raw,
-                country,
-            )
-
-    LOGGER.info(
-        "Requesting number with ID %s and limit $%s.",
-        country_id if country_id is not None else "auto",
-        f"{max_price:.2f}" if max_price is not None else "none",
-    )
-
-    BANNED_OPERATORS = ["textnow", "virtual", "google voice"]
+            country_id = None
 
     while True:
         _check_shutdown(STOP_EVENT)
-        activation_id, phone_number, operator_name = "", "", ""
         try:
+            # Запрашиваем номер СРАЗУ с указанием белого списка операторов
             payload = sms_api.verification_number(
                 service=telegram_service_code,
                 country=country,
                 max_price=max_price,
                 country_id=country_id,
+                operator=ALLOWED_OPERATORS # Передаем наш White List
             )
+            
+            # Проверяем на ошибки баланса или отсутствия номеров
+            if "error" in payload:
+                err = payload["error"].upper()
+                if "NO_NUMBERS" in err:
+                    LOGGER.info("No numbers available for allowed operators (%s). Waiting 15s...", ALLOWED_OPERATORS)
+                    time.sleep(15.0)
+                    continue
+                if "NO_BALANCE" in err:
+                    LOGGER.error("SMS Provider: Not enough funds on balance!")
+                    time.sleep(30.0)
+                    continue
+                raise RuntimeError(err)
+
             activation_id, phone_number, operator_name = extract_activation_and_phone(payload)
-
-            if operator_name and operator_name in BANNED_OPERATORS:
-                LOGGER.warning(
-                    "Operator '%s' is banned (TextNow/VoIP), cancelling and retrying...",
-                    operator_name,
-                )
-                try:
-                    sms_api.setStatus(activation_id, status=8)
-                    LOGGER.info("Cancelled activation %s for banned operator %s", activation_id, operator_name)
-                except Exception as e:
-                    LOGGER.error("Failed to cancel activation %s for banned operator: %s", activation_id, e)
-                time.sleep(3.0)
-                continue
-
+            
             save_activation_to_json(activation_id=activation_id, phone_number=phone_number)
             return activation_id, phone_number, operator_name
 
         except Exception as e:
-            LOGGER.warning("Rent number failed: %s. Retrying in 5s", e)
-            if activation_id:
-                try:
-                    sms_api.setStatus(activation_id, status=8)
-                except Exception:
-                    pass  # Ignore errors during cleanup
+            LOGGER.warning("Rent number request failed: %s. Retrying in 5s", e)
             time.sleep(5.0)
 
 

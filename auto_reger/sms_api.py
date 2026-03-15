@@ -19,6 +19,7 @@ logging.basicConfig(
 
 # File used to track active SMS activations
 ACTIVATIONS_FILE: Path = PROJECT_ROOT / "activations.json"
+ALLOWED_OPERATORS = "tmobile,att,verizon,lycamobile,sprint"
 
 
 # ---------------------------------------------------------------------------
@@ -481,25 +482,8 @@ class SmsApi(SMSActivateAPI):
         country: str,
         max_price: Optional[float] = None,
         country_id: Optional[int] = None,
+        operator: Optional[str] = None,  # Добавили новый параметр
     ) -> Dict[str, Any]:
-        """
-        Rent a phone number for SMS verification.
-
-        This wraps the provider's ``getNumberV2`` endpoint and normalises the
-        response into a dictionary with the following typical keys:
-
-            - ``phoneNumber``    – allocated phone number as string
-            - ``activationId``   – activation id to be used with status methods
-            - ``activationCost`` – price of the activation, if provided
-            - ``error``          – error message (if any)
-
-        :param service: Service short name (e.g. "tg" for Telegram).
-        :param country: Country name in English/Russian as understood by provider.
-        :param max_price: Optional maximum price filter.
-        :param country_id: Optional explicit provider country id. If provided,
-                           this id is used as-is and country name lookup is skipped.
-        :return: Response dictionary from provider (possibly containing 'error').
-        """
         if country_id is None:
             resolved_country_id = self._get_country_id(country)
         else:
@@ -509,31 +493,33 @@ class SmsApi(SMSActivateAPI):
                 raise ValueError(f"Invalid country_id value: {country_id!r}") from exc
 
         kwargs: Dict[str, Any] = {"service": service, "country": int(resolved_country_id)}
+        
+        # Добавляем оператора в параметры запроса, если он указан
+        if operator:
+            kwargs["operator"] = operator
+
         normalized_max_price: Optional[float] = None
         if max_price is not None:
             normalized_max_price = float(max_price)
             kwargs["maxPrice"] = normalized_max_price
 
         logging.info(
-            "Requesting number: service=%s country=%s (id=%s) max_price=%s",
+            "Requesting number: service=%s country=%s (id=%s) operator=%s max_price=%s",
             service,
             country,
             resolved_country_id,
+            operator or "any",
             max_price,
         )
 
         try:
+            # Метод getNumberV2 из базового класса SMSActivateAPI отправит эти kwargs в URL
             resp: Any = self.getNumberV2(**kwargs)
         except TypeError as e:
-            # Some client versions may expect max_price instead of maxPrice.
             if normalized_max_price is not None and "maxPrice" in str(e):
                 fallback_kwargs = dict(kwargs)
                 fallback_kwargs.pop("maxPrice", None)
                 fallback_kwargs["max_price"] = normalized_max_price
-                logging.info(
-                    "Provider client rejected maxPrice, retrying with max_price for country_id=%s",
-                    resolved_country_id,
-                )
                 try:
                     resp = self.getNumberV2(**fallback_kwargs)
                 except Exception as retry_error:
@@ -556,7 +542,6 @@ class SmsApi(SMSActivateAPI):
             logging.warning("Unexpected getNumberV2 response type: %s", type(resp).__name__)
             return {"error": provider_error}
 
-        # Ensure the returned structure has consistent keys.
         if "phoneNumber" not in resp and "number" in resp:
             resp["phoneNumber"] = resp["number"]
 
