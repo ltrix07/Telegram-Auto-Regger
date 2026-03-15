@@ -873,14 +873,17 @@ class DeviceController:
 
     def launch_telegram(self) -> None:
         """
-        Launch official Telegram using dynamic intent resolution (monkey & u2)
-        to avoid hardcoded Activity class name mismatch.
+        Launch Telegram by dynamically querying the OS for the exact Launch Activity
+        and using aggressive foreground start flags for Android 11+.
         """
         LOGGER.info("Launching Telegram on %s", self.device_id)
         self.invalidate_ui_dump_cache()
         time.sleep(3.0)
 
-        # Динамически узнаем реальное имя установленного пакета Telegram
+        if self.u2_client is None:
+            self.u2_client = u2.connect(self.device_id)
+
+        # 1. Динамически узнаем реальное имя установленного пакета
         installed_pkgs = self._adb("shell", "pm", "list", "packages", check=False).stdout
         
         if "package:org.telegram.messenger.web" in installed_pkgs:
@@ -894,27 +897,24 @@ class DeviceController:
             
         LOGGER.info("Dynamically set Telegram package to: %s", self.telegram_package)
 
-        if self.u2_client is None:
-            self.u2_client = u2.connect(self.device_id)
+        # 2. Спрашиваем у самого Android точное имя стартового экрана
+        resolve_cmd = ["shell", "cmd", "package", "resolve-activity", "--brief", self.telegram_package]
+        resolve_output = self._adb(*resolve_cmd, check=False).stdout.strip()
+        
+        # Парсим последнюю строку ответа (там будет пакет/класс)
+        main_activity = resolve_output.split('\n')[-1].strip()
+        LOGGER.info("System resolved main activity to: %s", main_activity)
 
-        # 1. Запускаем через встроенный метод u2 (он сам читает манифест и находит нужный класс)
-        try:
-            LOGGER.info("Attempting to launch via uiautomator2...")
-            self.u2_client.app_start(self.telegram_package, stop=True)
-        except Exception as e:
-            LOGGER.warning("u2 app_start failed: %s", e)
-
-        # 2. Делаем надежный контрольный выстрел через monkey
-        # Monkey имитирует нажатие пальцем на иконку пользователем. 
-        # Это 100% обходит ограничения Redroid 11 и не требует знания имени класса.
-        LOGGER.info("Sending monkey intent to ensure app is in foreground...")
-        self._adb(
-            "shell", "monkey", 
-            "-p", self.telegram_package, 
-            "-c", "android.intent.category.LAUNCHER", 
-            "1", 
-            check=False
-        )
+        # 3. Агрессивный запуск с обходом ограничений фона (Android 11)
+        launch_cmd = [
+            "shell", "am", "start", "-W", "-n", main_activity,
+            "-a", "android.intent.action.MAIN",
+            "-c", "android.intent.category.LAUNCHER",
+            "--windowingMode", "1"
+        ]
+        
+        LOGGER.info("Sending aggressive start intent...")
+        self._adb(*launch_cmd, check=False)
 
         LOGGER.info("Waiting for app interface to load (first launch may take 60+ seconds)...")
         deadline = time.time() + 60.0
