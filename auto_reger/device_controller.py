@@ -873,8 +873,8 @@ class DeviceController:
 
     def launch_telegram(self) -> None:
         """
-        Launch official Telegram using aggressive am start (for Android 11 background bypass)
-        and uiautomator2 for UI detection.
+        Launch official Telegram using dynamic intent resolution (monkey & u2)
+        to avoid hardcoded Activity class name mismatch.
         """
         LOGGER.info("Launching Telegram on %s", self.device_id)
         self.invalidate_ui_dump_cache()
@@ -883,25 +883,24 @@ class DeviceController:
         if self.u2_client is None:
             self.u2_client = u2.connect(self.device_id)
 
-        activity_suffix = ".ui.LaunchActivity"
-        if self.telegram_package == "org.thunderdog.challegram":
-            activity_suffix = ".MainActivity"
-            
-        component_name = f"{self.telegram_package}/{activity_suffix}"
-
-        # Агрессивная команда запуска специально для Redroid 11
-        launch_cmd = [
-            "shell", "am", "start", "-W", "-n", component_name,
-            "-a", "android.intent.action.MAIN",
-            "-c", "android.intent.category.LAUNCHER",
-            "--windowingMode", "1"
-        ]
-        
+        # 1. Запускаем через встроенный метод u2 (он сам читает манифест и находит нужный класс)
         try:
-            self._adb(*launch_cmd, check=False)
-        except Exception as e:
-            LOGGER.warning("am start failed: %s. Falling back to u2 app_start.", e)
+            LOGGER.info("Attempting to launch via uiautomator2...")
             self.u2_client.app_start(self.telegram_package, stop=True)
+        except Exception as e:
+            LOGGER.warning("u2 app_start failed: %s", e)
+
+        # 2. Делаем надежный контрольный выстрел через monkey
+        # Monkey имитирует нажатие пальцем на иконку пользователем. 
+        # Это 100% обходит ограничения Redroid 11 и не требует знания имени класса.
+        LOGGER.info("Sending monkey intent to ensure app is in foreground...")
+        self._adb(
+            "shell", "monkey", 
+            "-p", self.telegram_package, 
+            "-c", "android.intent.category.LAUNCHER", 
+            "1", 
+            check=False
+        )
 
         LOGGER.info("Waiting for app interface to load (first launch may take 60+ seconds)...")
         deadline = time.time() + 60.0
@@ -920,21 +919,19 @@ class DeviceController:
             debug_img_path = os.path.join(self.debug_dir, f"timeout_launch_{timestamp}.png")
             debug_log_path = os.path.join(self.debug_dir, f"timeout_launch_{timestamp}_logcat.txt")
             
-            # 1. Сохраняем скриншот
             self.take_screenshot(debug_img_path)
             
-            # 2. Вытягиваем системные логи (краши, ошибки Java/C++)
             try:
-                logcat_data = self._adb("shell", "logcat", "-d", "-b", "crash,main,system", timeout=15).stdout
+                logcat_data = self._adb("shell", "logcat", "-d", "-b", "main,system", "-s", "ActivityManager", timeout=15).stdout
                 with open(debug_log_path, "w", encoding="utf-8") as f:
                     f.write(logcat_data)
-            except Exception as e:
-                LOGGER.error(f"Failed to dump logcat: {e}")
+            except Exception:
+                pass
                 
             raise RuntimeError(
                 f"App load timeout: Telegram UI failed to render.\n"
                 f"Saved screenshot: {debug_img_path}\n"
-                f"Saved crash log: {debug_log_path}"
+                f"Check logcat file: {debug_log_path}"
             )
         else:
             LOGGER.info("Telegram interface successfully loaded and is ready for proxy setup.")
