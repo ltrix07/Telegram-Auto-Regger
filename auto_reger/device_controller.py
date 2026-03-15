@@ -1176,18 +1176,14 @@ class DeviceController:
                 "email_field",
                 "login_email_field",
             ),
-            text_candidates=("your email address", "please enter your email"),
+            # ДОБАВЛЕНЫ НОВЫЕ ТЕКСТЫ СЮДА:
+            text_candidates=("your email address", "please enter your email", "choose a login email", "login email"),
             timeout=25.0,
             check_blockers=True,
             step_name="phone submission",
             include_existing_account=True,
         )
         if not ui_next_ready:
-            LOGGER.warning("Timeout waiting for code/email screen. Checking for blockers before failing.")
-            try:
-                self._raise_for_auth_blockers(step_name="phone submission timeout", include_existing_account=True)
-            except RuntimeError:
-                raise  # Re-raise specific blocker errors
             self._dump_debug_info_and_raise("Failed to reach code/email screen after phone submission.")
 
         self._handle_post_action_popups(rounds=2, include_accept=False)
@@ -1776,7 +1772,8 @@ class DeviceController:
     @staticmethod
     def _parse_bounds(bounds: str) -> Optional[Tuple[int, int]]:
         import random
-        # Исправленная регулярка: одинарные слеши для экранирования скобок
+        import re
+        # Правильная регулярка с одинарными слешами
         match = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds or "")
         if not match:
             return None
@@ -1788,8 +1785,7 @@ class DeviceController:
         if width <= 0 or height <= 0:
             return left, top
             
-        # Умный клик: берем центр и добавляем случайное смещение (до 30% от размера в каждую сторону).
-        # Таким образом мы кликаем в безопасную центральную зону (60% площади), но никогда не в один и тот же пиксель.
+        # Умный клик (Humanized tap)
         offset_x = random.randint(int(-width * 0.3), int(width * 0.3))
         offset_y = random.randint(int(-height * 0.3), int(height * 0.3))
         
