@@ -2,9 +2,10 @@
 
 import logging
 import os
-import signal
+import random
 import re
 import shlex
+import signal
 import subprocess
 import time
 import xml.etree.ElementTree as ET
@@ -42,6 +43,11 @@ class DeviceController:
         "com.ayugram.app"
     )
     UI_DUMP_PATH = "/sdcard/window_dump.xml"
+    PREMIUM_BLOCK_TEXT_CANDIDATES = (
+        "subscribe to get a code via sms",
+        "requested too many sms codes",
+        "telegram premium",
+    )
     PROXY_ENABLE_TEXT_CANDIDATES = (
         "enable proxy",
         "enable",
@@ -1151,7 +1157,7 @@ class DeviceController:
             for _ in range(4):
                 self._adb("shell", "input", "keyevent", "67", check=False)  # KEYCODE_DEL (Backspace)
 
-            self._input_text(cc_digits)
+            self.human_typing(cc_digits)
             time.sleep(0.3)
 
         tapped_phone = self.wait_and_tap_resource(
@@ -1163,7 +1169,7 @@ class DeviceController:
             self._tap_percent(0.60, 0.42)
             LOGGER.debug("Tapped phone number field by fallback coordinates")
 
-        self._input_text(phone_digits)
+        self.human_typing(phone_digits)
         time.sleep(0.5)
 
         next_btn_resources = ("login_btn", "next_button", "done_button", "ok_button", "floating_button", "fab")
@@ -1236,7 +1242,7 @@ class DeviceController:
             self._dump_debug_info_and_raise("Telegram UI failed to render code input fields in time.")
 
         time.sleep(1.0)
-        self._input_text(str(code))
+        self.human_typing(str(code))
 
         time.sleep(0.5)
         next_btn_resources = ("login_btn", "next_button", "done_button", "ok_button", "floating_button", "fab")
@@ -1283,7 +1289,7 @@ class DeviceController:
                 # Клик по обновленным координатам (поле почты находится в верхней трети экрана)
                 self._tap_percent(0.5, 0.33)
 
-        self._input_text(email)
+        self.human_typing(email)
         if not self.wait_and_tap_resource(
             ("login_btn", "next_button", "done_button", "ok_button"),
             timeout=6.0,
@@ -1310,16 +1316,16 @@ class DeviceController:
             self._dump_debug_info_and_raise("Profile UI didn't fully render or stuck on previous step.")
 
         if self._safe_tap_telegram_resources(self.FIRST_NAME_RESOURCE_ID_SUFFIXES, reason="first name field"):
-            self._input_text(first_name)
+            self.human_typing(first_name)
         else:
             self._tap_percent(0.5, 0.26)
-            self._input_text(first_name)
+            self.human_typing(first_name)
 
         if self._safe_tap_telegram_resources(self.LAST_NAME_RESOURCE_ID_SUFFIXES, reason="last name field"):
-            self._input_text(last_name)
+            self.human_typing(last_name)
         else:
             self._tap_percent(0.5, 0.36)
-            self._input_text(last_name)
+            self.human_typing(last_name)
 
         submit_resources = ("login_btn", "done_button", "next_button", "ok_button", "floating_button", "fab")
         if not self._safe_tap_telegram_resources(submit_resources, reason="submit profile name"):
@@ -1466,6 +1472,10 @@ class DeviceController:
         if self._screen_contains_candidates(self.SMS_FEE_TEXT_CANDIDATES):
             raise RuntimeError(f"Telegram requested paid SMS flow on `{step_name}`.")
 
+        if self._screen_contains_candidates(self.PREMIUM_BLOCK_TEXT_CANDIDATES):
+            self._safe_tap_by_text_candidates(self.BACK_TEXT_CANDIDATES, reason="back from premium popup")
+            raise RuntimeError(f"Telegram Anti-Fraud triggered on `{step_name}`: Soft-banned, demanding Telegram Premium for SMS.")
+        
         if include_existing_account and self._screen_contains_candidates(self.EXISTING_ACCOUNT_TEXT_CANDIDATES):
             self._handle_existing_account_fallback()
             raise RuntimeError(
@@ -1888,6 +1898,68 @@ class DeviceController:
     def _input_text(self, value: str) -> None:
         self.u2_client.send_keys(str(value), clear=False)
         self.invalidate_ui_dump_cache()
+
+    def human_typing(self, text: str) -> None:
+        """
+        Simulate human-like typing by inputting text character by character with random delays.
+        """
+        for char in text:
+            self._adb("shell", "input", "text", char)
+            if char.isdigit():
+                time.sleep(random.uniform(0.05, 0.15))
+            else:
+                time.sleep(random.uniform(0.1, 0.35))
+        self.invalidate_ui_dump_cache()
+
+    def warmup_emulator(self) -> None:
+        """
+        Warm up the emulator by adding fake contacts to the contact list.
+        """
+        LOGGER.info("Warming up emulator: adding fake contacts")
+        self._adb("shell", "pm", "grant", "org.telegram.messenger.web", "android.permission.READ_CONTACTS", check=False)
+        
+        contacts = [
+            ("John", "Smith", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
+            ("Alice", "Johnson", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
+            ("Bob", "Williams", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
+            ("Michael", "Brown", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
+            ("Jessica", "Jones", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
+            ("David", "Garcia", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
+            ("Sarah", "Miller", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
+            ("Christopher", "Davis", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
+            ("Ashley", "Rodriguez", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
+            ("Matthew", "Martinez", "+1" + "".join([str(random.randint(0, 9)) for _ in range(10)])),
+        ]
+
+        for first_name, last_name, phone_number in contacts:
+            try:
+                # Insert a raw contact
+                raw_contact_id_result = self._adb(
+                    "shell", "content", "insert", "--uri", "content://com.android.contacts/raw_contacts",
+                    "--bind", "account_name:s:null", "--bind", "account_type:s:null"
+                )
+                raw_contact_id_uri = raw_contact_id_result.stdout.strip()
+                raw_contact_id = raw_contact_id_uri.split('/')[-1]
+
+                # Insert the contact name
+                self._adb(
+                    "shell", "content", "insert", "--uri", "content://com.android.contacts/data",
+                    "--bind", f"raw_contact_id:i:{raw_contact_id}",
+                    "--bind", "mimetype:s:vnd.android.cursor.item/name",
+                    "--bind", f"data1:s:{first_name} {last_name}"
+                )
+
+                # Insert the contact phone number
+                self._adb(
+                    "shell", "content", "insert", "--uri", "content://com.android.contacts/data",
+                    "--bind", f"raw_contact_id:i:{raw_contact_id}",
+                    "--bind", "mimetype:s:vnd.android.cursor.item/phone_v2",
+                    "--bind", f"data1:s:{phone_number}",
+                    "--bind", "data2:i:2"  # Type: Mobile
+                )
+                LOGGER.info(f"Added contact: {first_name} {last_name} ({phone_number})")
+            except Exception as e:
+                LOGGER.error(f"Failed to add contact {first_name} {last_name}: {e}")
 
     def dump_screen(self) -> str:
         """

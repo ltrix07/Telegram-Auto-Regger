@@ -1,16 +1,14 @@
 services:
-  # --- 1. Шлюз для проксификации (tun2socks) ---
   tun2socks_1:
     image: xjasonlyu/tun2socks:v2.5.1
     container_name: android_proxy_gateway_1
-    command: --loglevel info --proxy socks5://LOGIN:PASSWORD@IP:PORT --device tun0
+    command: --loglevel info --proxy ${PROXY_URL:-socks5://127.0.0.1:1080} --device tun0
     privileged: true
     cap_add:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
     ports:
-      # Порт ADB теперь пробрасывается наружу через этот шлюз
       - "5555:5555"
     healthcheck:
       test: ["CMD-SHELL", "pgrep tun2socks"]
@@ -19,7 +17,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # --- 2. Сам эмулятор Android ---
   android_1:
     image: redroid/redroid:11.0.0-latest
     container_name: android_1
@@ -27,15 +24,17 @@ services:
     shm_size: '2gb'
     depends_on:
       - tun2socks_1
-    # МАГИЯ: Заставляем Android использовать сетевую карту шлюза tun2socks
     network_mode: "service:tun2socks_1"
+    
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     
     command:
       - androidboot.redroid_width=720
       - androidboot.redroid_height=1280
       - androidboot.redroid_fps=30
     environment:
-      # --- Уникальный отпечаток (Samsung Galaxy S21 / Android 11) ---
       - ro.product.model=SM-G991U
       - ro.product.manufacturer=samsung
       - ro.product.brand=samsung
@@ -48,26 +47,23 @@ services:
       - ro.build.fingerprint=samsung/o1qsqw/o1q:11/RP1A.200720.012/G991USQU4AUF5:user/release-keys
       - ro.build.description=o1qsqw-user 11 RP1A.200720.012 G991USQU4AUF5 release-keys
       
-      # --- Настройки гео и таймзоны (под US прокси) ---
       - ro.product.locale=en-US
       - persist.sys.timezone=America/New_York
       - TZ=America/New_York
 
-      # --- Базовые системные настройки ---
       - ro.kernel.qemu=0
-      - redroid.prop.ro.secure=0
-      - redroid.prop.ro.debuggable=1
+      
+      - redroid.prop.ro.secure=1
+      - redroid.prop.ro.debuggable=0
 
-      # --- Динамические настройки Гео и Локали ---
       - ro.product.locale=${SYS_LOCALE:-en-US}
       - persist.sys.timezone=${SYS_TIMEZONE:-America/New_York}
       - TZ=${SYS_TIMEZONE:-America/New_York}
 
-      # --- Жесткий спуфинг SIM-карты (TelephonyManager) ---
-      - gsm.sim.state=5  # 5 = SIM_STATE_READY (Симка вставлена и работает)
-      - gsm.sim.operator.numeric=${SIM_NUMERIC:-310260} # MCC+MNC (Код страны + Код оператора)
-      - gsm.sim.operator.alpha=${SIM_ALPHA:-T-Mobile}   # Имя оператора
-      - gsm.sim.operator.iso-country=${SIM_ISO:-us}     # Код страны ISO
+      - gsm.sim.state=5 
+      - gsm.sim.operator.numeric=${SIM_NUMERIC:-310260} 
+      - gsm.sim.operator.alpha=${SIM_ALPHA:-T-Mobile} 
+      - gsm.sim.operator.iso-country=${SIM_ISO:-us} 
       - gsm.operator.numeric=${SIM_NUMERIC:-310260}     
       - gsm.operator.alpha=${SIM_ALPHA:-T-Mobile}       
       - gsm.operator.iso-country=${SIM_ISO:-us}

@@ -93,16 +93,18 @@ class DockerAndroidController:
         LOGGER.info("Docker action `%s` completed successfully", action)
         return result
 
-    def start_container(self) -> None:
+    def start_container(self, extra_env: Optional[dict[str, str]] = None) -> None:
         """Starts Android container stack using docker-compose up -d."""
-        env = None
+        env = {}
         if self.country_code:
             from .sim_spoofing import get_sim_env_for_country
-
             LOGGER.info("Applying SIM spoofing for country: %s", self.country_code)
-            env = get_sim_env_for_country(self.country_code)
+            env.update(get_sim_env_for_country(self.country_code))
+            
+        if extra_env:
+            env.update(extra_env)
 
-        self._run_compose(["up", "-d"], action="start_container", env=env)
+        self._run_compose(["up", "-d"], action="start_container", env=env if env else None)
 
     def stop_container(self) -> None:
         """Stops and destroys Android container stack, including volumes."""

@@ -41,6 +41,72 @@ ALERT_RATE_LIMIT_LOCK = threading.Lock()
 LAST_CYCLE_ALERT_AT: dict[str, float] = {}
 ALERT_SEND_LOCK = threading.Lock()
 
+DEVICE_PROFILES = [
+    {
+        "ro.product.model": "SM-S908E",
+        "ro.product.manufacturer": "samsung",
+        "ro.product.brand": "samsung",
+        "ro.product.name": "b0s",
+        "ro.product.device": "b0s",
+        "ro.build.fingerprint": "samsung/b0s/b0s:13/TP1A.220624.014/S908EXXS7DXD3:user/release-keys",
+        "ro.build.description": "b0s-user 13 TP1A.220624.014 S908EXXS7DXD3 release-keys",
+    },
+    {
+        "ro.product.model": "Pixel 6",
+        "ro.product.manufacturer": "Google",
+        "ro.product.brand": "google",
+        "ro.product.name": "oriole",
+        "ro.product.device": "oriole",
+        "ro.build.fingerprint": "google/oriole/oriole:13/T2B1.221118.006/9216481:user/release-keys",
+        "ro.build.description": "oriole-user 13 T2B1.221118.006 9216481 release-keys",
+    },
+    {
+        "ro.product.model": "Pixel 7",
+        "ro.product.manufacturer": "Google",
+        "ro.product.brand": "google",
+        "ro.product.name": "panther",
+        "ro.product.device": "panther",
+        "ro.build.fingerprint": "google/panther/panther:13/TQ1A.230105.002/9325679:user/release-keys",
+        "ro.build.description": "panther-user 13 TQ1A.230105.002 9325679 release-keys",
+    },
+    {
+        "ro.product.model": "OnePlus 9",
+        "ro.product.manufacturer": "OnePlus",
+        "ro.product.brand": "OnePlus",
+        "ro.product.name": "OnePlus9",
+        "ro.product.device": "OnePlus9",
+        "ro.build.fingerprint": "OnePlus/OnePlus9/OnePlus9:12/RKQ1.211112.001/2201112233:user/release-keys",
+        "ro.build.description": "OnePlus9-user 12 RKQ1.211112.001 2201112233 release-keys",
+    },
+    {
+        "ro.product.model": "SM-G998B",
+        "ro.product.manufacturer": "samsung",
+        "ro.product.brand": "samsung",
+        "ro.product.name": "p3s",
+        "ro.product.device": "p3s",
+        "ro.build.fingerprint": "samsung/p3s/p3s:13/TP1A.220624.014/G998BXXS9FXC9:user/release-keys",
+        "ro.build.description": "p3s-user 13 TP1A.220624.014 G998BXXS9FXC9 release-keys",
+    },
+    {
+        "ro.product.model": "Xiaomi 2201123G",
+        "ro.product.manufacturer": "Xiaomi",
+        "ro.product.brand": "Xiaomi",
+        "ro.product.name": "veux",
+        "ro.product.device": "veux",
+        "ro.build.fingerprint": "Xiaomi/veux_global/veux:13/SKQ1.2201123.001/V14.0.5.0.TKCMIXM:user/release-keys",
+        "ro.build.description": "veux_global-user 13 SKQ1.2201123.001 V14.0.5.0.TKCMIXM release-keys",
+    },
+    {
+        "ro.product.model": "SM-A528B",
+        "ro.product.manufacturer": "samsung",
+        "ro.product.brand": "samsung",
+        "ro.product.name": "a52sxq",
+        "ro.product.device": "a52sxq",
+        "ro.build.fingerprint": "samsung/a52sxq/a52sxq:13/TP1A.220624.014/A528BXXS6FXC2:user/release-keys",
+        "ro.build.description": "a52sxq-user 13 TP1A.220624.014 A528BXXS6FXC2 release-keys",
+    },
+]
+
 ROUTINE_ALERT_SKIP_PATTERNS: tuple[str, ...] = (
     "sms status polling failed",
     # "sms code not received",
@@ -875,16 +941,50 @@ def run_single_cycle(
         docker_controller.stop_container()
         _check_shutdown(stop_event)
 
+        country = str(CONFIG.get("registration", {}).get("default_country", "US")).strip() or "US"
+        proxy_data = proxy_api.get_proxy(country_code=country)
+        if not proxy_data:
+            raise RuntimeError(f"Proxy is required but none returned for country={country}.")
+
+        proxy_host = str(proxy_data.get("ip", "")).strip()
+        proxy_port = str(proxy_data.get("port", "")).strip()
+        proxy_user = str(proxy_data.get("user", "")).strip()
+        proxy_password = str(proxy_data.get("pass", "")).strip()
+        proxy_type = str(proxy_data.get("type", "")).strip().lower()
+        
+        if proxy_type != "socks5":
+            raise RuntimeError(f"Proxy must be SOCKS5 for tun2socks. Got type={proxy_type!r}")
+
+        proxy_dict: Dict[str, Any] = {
+            "type": "socks5", "host": proxy_host, "port": int(proxy_port),
+            "username": proxy_user, "password": proxy_password,
+        }
+
+        tun2socks_url = f"socks5://{proxy_user}:{proxy_password}@{proxy_host}:{proxy_port}"
+
+        device_profile = random.choice(DEVICE_PROFILES)
+        LOGGER.info("Selected device profile: %s", device_profile.get("ro.product.model"))
+        extra_env = {"PROXY_URL": tun2socks_url}
+        extra_env.update(device_profile)
+
         LOGGER.info(
-            "Cycle %s/%s starting fresh Docker Android container",
+            "Cycle %s/%s starting fresh Docker Android container with proxy rotation",
             cycle_index,
             total_cycles,
         )
-        docker_controller.start_container()
+        docker_controller.start_container(extra_env=extra_env)
         docker_controller.wait_for_boot(device_udid=device_id, timeout=boot_timeout)
         _check_shutdown(stop_event)
         try:
-            docker_controller.install_apk(device_id)
+            import os
+            webview_path = "/app/webview.apk"
+            if os.path.exists(webview_path):
+                LOGGER.info("Found webview.apk, installing updated Android System WebView...")
+                docker_controller.install_apk(device_id, apk_path=webview_path)
+            else:
+                LOGGER.warning("webview.apk not found in /app! Anti-fraud trust might be lower.")
+            
+            docker_controller.install_apk(device_id, apk_path="/app/telegram.apk")
         except Exception:
             LOGGER.critical(
                 "Cycle %s/%s failed: Telegram APK installation failed on %s. Aborting cycle.",
@@ -913,44 +1013,7 @@ def run_single_cycle(
         if not device.is_ready():
             raise RuntimeError(f"Device {device_id} is not ready for registration.")
         device.hide_root()
-
-        country = str(CONFIG.get("registration", {}).get("default_country", "US")).strip() or "US"
-        proxy_data = proxy_api.get_proxy(country_code=country)
-        if not proxy_data:
-            LOGGER.error(
-                "Cycle %s/%s proxy acquisition failed: proxy_data is empty for country=%s.",
-                cycle_index,
-                total_cycles,
-                country,
-            )
-            raise RuntimeError(f"Proxy is required for registration but none returned for country={country}.")
-
-        proxy_host = str(proxy_data.get("ip", "")).strip()
-        proxy_port = str(proxy_data.get("port", "")).strip()
-        proxy_user = str(proxy_data.get("user", "")).strip()
-        proxy_password = str(proxy_data.get("pass", "")).strip()
-        proxy_type = str(proxy_data.get("type", "")).strip().lower()
-        if not proxy_host or not proxy_port.isdigit():
-            LOGGER.error(
-                "Cycle %s/%s invalid proxy payload from ProxyApi: %r",
-                cycle_index,
-                total_cycles,
-                proxy_data,
-            )
-            raise RuntimeError(f"Invalid proxy payload from ProxyApi: {proxy_data!r}")
-        if proxy_type != "socks5":
-            raise RuntimeError(
-                f"Proxy must be SOCKS5 for Telegram intent flow. Got type={proxy_type!r}, payload={proxy_data!r}"
-            )
-
-        proxy_dict: Dict[str, Any] = {
-            "type": "socks5",
-            "host": proxy_host,
-            "port": int(proxy_port),
-            "username": proxy_user,
-            "password": proxy_password,
-        }
-
+        device.warmup_emulator()
         device.launch_telegram()
 
         _check_shutdown(stop_event)
@@ -1177,27 +1240,8 @@ def run_single_cycle_with_video(
             country_code=sim_country_code
         )
         docker_controller.stop_container()
-        docker_controller.start_container()
-        docker_controller.wait_for_boot(device_udid=device_id, timeout=boot_timeout)
         _check_shutdown(stop_event)
-        try:
-            docker_controller.install_apk(device_id)
-        except Exception:
-            LOGGER.critical(
-                "Cycle %s/%s failed: Telegram APK installation failed on %s. Aborting cycle.",
-                cycle_index,
-                total_cycles,
-                device_id,
-                exc_info=True,
-            )
-            return CycleResult(index=cycle_index, success=False, device_id=device_id, phone_number="")
 
-        device = DeviceController(device_id=device_id, require_root=require_root)
-        device.connect()
-        if not device.is_ready():
-            raise RuntimeError(f"Device {device_id} is not ready for registration.")
-        device.hide_root()
-        
         country = str(CONFIG.get("registration", {}).get("default_country", "US")).strip() or "US"
         proxy_data = proxy_api.get_proxy(country_code=country)
         if not proxy_data:
@@ -1215,6 +1259,43 @@ def run_single_cycle_with_video(
             "type": "socks5", "host": proxy_host, "port": int(proxy_port),
             "username": proxy_user, "password": proxy_password,
         }
+        tun2socks_url = f"socks5://{proxy_user}:{proxy_password}@{proxy_host}:{proxy_port}"
+
+        device_profile = random.choice(DEVICE_PROFILES)
+        LOGGER.info("Selected device profile: %s", device_profile.get("ro.product.model"))
+        extra_env = {"PROXY_URL": tun2socks_url}
+        extra_env.update(device_profile)
+
+        docker_controller.start_container(extra_env=extra_env)
+        docker_controller.wait_for_boot(device_udid=device_id, timeout=boot_timeout)
+        _check_shutdown(stop_event)
+        
+        try:
+            import os
+            webview_path = "/app/webview.apk"
+            if os.path.exists(webview_path):
+                LOGGER.info("Found webview.apk, installing updated Android System WebView...")
+                docker_controller.install_apk(device_id, apk_path=webview_path)
+            else:
+                LOGGER.warning("webview.apk not found in /app! Anti-fraud trust might be lower.")
+                
+            docker_controller.install_apk(device_id, apk_path="/app/telegram.apk")
+        except Exception:
+            LOGGER.critical(
+                "Cycle %s/%s failed: APK installation failed on %s. Aborting cycle.",
+                cycle_index,
+                total_cycles,
+                device_id,
+                exc_info=True,
+            )
+            return CycleResult(index=cycle_index, success=False, device_id=device_id, phone_number="")
+
+        device = DeviceController(device_id=device_id, require_root=require_root)
+        device.connect()
+        if not device.is_ready():
+            raise RuntimeError(f"Device {device_id} is not ready for registration.")
+        device.hide_root()
+        device.warmup_emulator()
 
         # Инициализируем новый регистратор
         video_registrator = TelegramRegistratorWithVideo(
@@ -1347,6 +1428,11 @@ def run(notifier: Optional[TelegramNotifier] = None) -> int:
     if args.count < 1:
         raise ValueError("--count must be >= 1")
 
+    country_code = args.country
+    if not country_code:
+        country_code = str(CONFIG.get("registration", {}).get("default_country", "US")).strip()
+        LOGGER.info("No --country CLI arg provided. Using default_country from config: %s", country_code)
+
     install_signal_handlers(STOP_EVENT)
 
     devices = resolve_devices(args)
@@ -1408,7 +1494,7 @@ def run(notifier: Optional[TelegramNotifier] = None) -> int:
                         last_names=last_names,
                         notifier=runtime_notifier,
                         require_root=require_root,
-                        sim_country_code=args.country,
+                        sim_country_code=country_code,
                     )
                 )
                 active += 1
