@@ -19,7 +19,6 @@ logging.basicConfig(
 
 # File used to track active SMS activations
 ACTIVATIONS_FILE: Path = PROJECT_ROOT / "activations.json"
-ALLOWED_OPERATORS = "tmobile,att,verizon,lycamobile,sprint"
 
 
 # ---------------------------------------------------------------------------
