@@ -677,7 +677,7 @@ def rent_number_with_retry(sms_api: SmsApi) -> Tuple[str, str, str]:
                 country=country,
                 max_price=max_price,
                 country_id=country_id,
-                # operator=ALLOWED_OPERATORS
+                operator=ALLOWED_OPERATORS
             )
             
             # Проверяем на ошибки баланса или отсутствия номеров
