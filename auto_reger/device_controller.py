@@ -1063,111 +1063,73 @@ class DeviceController:
         self._ensure_frida_server()
 
         js_code = """
-            setTimeout(function() {
-                Java.perform(function () {
+            Java.performNow(function () {
+                // ── 1. SafetyNet ────────────────────────────────────────────────────────
+                try {
+                    var JSONObject = Java.use('org.json.JSONObject');
+                    JSONObject.optBoolean.overload('java.lang.String').implementation = function(key) {
+                        if (key === 'basicIntegrity' || key === 'ctsProfileMatch') return true;
+                        return this.optBoolean(key);
+                    };
+                    JSONObject.optBoolean.overload('java.lang.String', 'boolean').implementation = function(key, def) {
+                        if (key === 'basicIntegrity' || key === 'ctsProfileMatch') return true;
+                        return this.optBoolean(key, def);
+                    };
+                    send('[FRIDA] SafetyNet hook OK');
+                } catch(e) { send('[FRIDA] SafetyNet error: ' + e); }
 
-                    // ── 1. SafetyNet: JSONObject.optBoolean ──────────────────────────────
-                    try {
-                        var JSONObject = Java.use('org.json.JSONObject');
-                        JSONObject.optBoolean.overload('java.lang.String').implementation = function(key) {
-                            if (key === 'basicIntegrity' || key === 'ctsProfileMatch') {
-                                send('[FRIDA] SafetyNet spoof: ' + key + ' -> true');
-                                return true;
-                            }
-                            return this.optBoolean(key);
-                        };
-                        JSONObject.optBoolean.overload('java.lang.String', 'boolean').implementation = function(key, def) {
-                            if (key === 'basicIntegrity' || key === 'ctsProfileMatch') {
-                                send('[FRIDA] SafetyNet spoof (default): ' + key + ' -> true');
-                                return true;
-                            }
-                            return this.optBoolean(key, def);
-                        };
-                    } catch(e) { send('[FRIDA] SafetyNet hook error: ' + e); }
+                // ── 2. SystemProperties ─────────────────────────────────────────────────
+                try {
+                    var SystemProperties = Java.use('android.os.SystemProperties');
+                    var spoofedProps = {
+                        'ro.kernel.qemu': '0',
+                        'ro.hardware': 'qcom',
+                        'ro.product.board': 'redfin',
+                        'ro.boot.qemu': '0',
+                        'ro.boot.hardware': 'qcom',
+                        'init.svc.qemu-props': '',
+                        'qemu.sf.lcd_density': '',
+                    };
+                    SystemProperties.get.overload('java.lang.String').implementation = function(key) {
+                        if (spoofedProps.hasOwnProperty(key)) return spoofedProps[key];
+                        return this.get(key);
+                    };
+                    SystemProperties.get.overload('java.lang.String', 'java.lang.String').implementation = function(key, def) {
+                        if (spoofedProps.hasOwnProperty(key)) return spoofedProps[key];
+                        return this.get(key, def);
+                    };
+                    send('[FRIDA] SystemProperties hook OK');
+                } catch(e) { send('[FRIDA] SystemProperties error: ' + e); }
 
-                    // ── 2. SystemProperties — прячем признаки эмулятора ─────────────────
-                    try {
-                        var SystemProperties = Java.use('android.os.SystemProperties');
-                        SystemProperties.get.overload('java.lang.String').implementation = function(key) {
-                            var emulatorKeys = {
-                                'ro.kernel.qemu': '0',
-                                'ro.hardware': 'qcom',
-                                'ro.product.board': 'redfin',
-                                'ro.boot.qemu': '0',
-                                'ro.boot.hardware': 'qcom',
-                                'init.svc.qemu-props': '',
-                                'qemu.sf.lcd_density': '',
-                            };
-                            if (emulatorKeys.hasOwnProperty(key)) {
-                                send('[FRIDA] SystemProperties spoof: ' + key + ' -> ' + emulatorKeys[key]);
-                                return emulatorKeys[key];
-                            }
-                            return this.get(key);
-                        };
-                        SystemProperties.get.overload('java.lang.String', 'java.lang.String').implementation = function(key, def) {
-                            var emulatorKeys = {
-                                'ro.kernel.qemu': '0',
-                                'ro.hardware': 'qcom',
-                                'ro.product.board': 'redfin',
-                                'ro.boot.qemu': '0',
-                                'ro.boot.hardware': 'qcom',
-                            };
-                            if (emulatorKeys.hasOwnProperty(key)) {
-                                send('[FRIDA] SystemProperties spoof (def): ' + key);
-                                return emulatorKeys[key];
-                            }
-                            return this.get(key, def);
-                        };
-                    } catch(e) { send('[FRIDA] SystemProperties hook error: ' + e); }
+                // ── 3. TelephonyManager — IMEI ──────────────────────────────────────────
+                try {
+                    var TelephonyManager = Java.use('android.telephony.TelephonyManager');
+                    var fakeImei = '357673090590608';
+                    TelephonyManager.getDeviceId.overload().implementation = function() { return fakeImei; };
+                    TelephonyManager.getImei.overload().implementation = function() { return fakeImei; };
+                    TelephonyManager.getImei.overload('int').implementation = function(slot) { return fakeImei; };
+                    send('[FRIDA] TelephonyManager hook OK');
+                } catch(e) { send('[FRIDA] TelephonyManager error: ' + e); }
 
-                    // ── 3. TelephonyManager — IMEI / DeviceId ────────────────────────────
-                    try {
-                        var TelephonyManager = Java.use('android.telephony.TelephonyManager');
-                        var fakeImei = '357673090590608';  // валидный Luhn IMEI
+                // ── 4. Build fields ─────────────────────────────────────────────────────
+                try {
+                    var Build = Java.use('android.os.Build');
+                    Build.FINGERPRINT.value = 'google/redfin/redfin:11/RQ3A.211001.001/7641976:user/release-keys';
+                    Build.MODEL.value = 'Pixel 5';
+                    Build.MANUFACTURER.value = 'Google';
+                    Build.BRAND.value = 'google';
+                    Build.DEVICE.value = 'redfin';
+                    Build.PRODUCT.value = 'redfin';
+                    Build.HARDWARE.value = 'qcom';
+                    Build.TAGS.value = 'release-keys';
+                    Build.TYPE.value = 'user';
+                    send('[FRIDA] Build fields hook OK');
+                } catch(e) { send('[FRIDA] Build error: ' + e); }
 
-                        TelephonyManager.getDeviceId.overload().implementation = function() {
-                            send('[FRIDA] getDeviceId spoofed');
-                            return fakeImei;
-                        };
-                        TelephonyManager.getImei.overload().implementation = function() {
-                            send('[FRIDA] getImei spoofed');
-                            return fakeImei;
-                        };
-                        TelephonyManager.getImei.overload('int').implementation = function(slot) {
-                            send('[FRIDA] getImei(slot) spoofed');
-                            return fakeImei;
-                        };
-                    } catch(e) { send('[FRIDA] TelephonyManager hook error: ' + e); }
-
-                    // ── 4. Build fields — прячем признаки эмулятора в Build ─────────────
-                    try {
-                        var Build = Java.use('android.os.Build');
-                        Build.FINGERPRINT.value = 'google/redfin/redfin:11/RQ3A.211001.001/7641976:user/release-keys';
-                        Build.MODEL.value = 'Pixel 5';
-                        Build.MANUFACTURER.value = 'Google';
-                        Build.BRAND.value = 'google';
-                        Build.DEVICE.value = 'redfin';
-                        Build.PRODUCT.value = 'redfin';
-                        Build.HARDWARE.value = 'qcom';
-                        Build.HOST.value = 'abfarm-release-rbe-00016';
-                        Build.TAGS.value = 'release-keys';
-                        Build.TYPE.value = 'user';
-                        send('[FRIDA] Build fields spoofed');
-                    } catch(e) { send('[FRIDA] Build hook error: ' + e); }
-
-                    // ── 5. Play Integrity API ────────────────────────────────────────────
-                    try {
-                        var StandardIntegrityManager = Java.use('com.google.android.play.core.integrity.StandardIntegrityManager');
-                        send('[FRIDA] StandardIntegrityManager found, patching...');
-                    } catch(e) {
-                        // Play Integrity может быть недоступен — не критично
-                        send('[FRIDA] Play Integrity not found (ok): ' + e);
-                    }
-
-                    send('[FRIDA] All hooks loaded successfully');
-                });
-            }, 1000);
+                send('[FRIDA] All hooks loaded');
+            });
             """
+
 
         try:
             LOGGER.info("Starting Telegram via Frida on %s...", self.device_id)
