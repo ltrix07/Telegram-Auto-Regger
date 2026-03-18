@@ -9,6 +9,29 @@
 # Формат .env: совместим с docker compose --env-file
 set -euo pipefail
 
+# ── ADB Key Check ─────────────────────────────────────────────────────────────
+# Контейнер запускается с ro.secure=1 и требует pre-authorized публичный ключ.
+# Файл должен быть на хосте по пути ~/.android/adbkey.pub перед первым запуском.
+ADB_KEY_FILE="${HOME}/.android/adbkey.pub"
+if [[ ! -f "${ADB_KEY_FILE}" ]]; then
+  echo "WARNING: ADB public key not found at ${ADB_KEY_FILE}." >&2
+  if command -v adb &>/dev/null; then
+    echo "Generating ADB keys via 'adb devices'..." >&2
+    adb devices >/dev/null 2>&1 || true
+    if [[ -f "${ADB_KEY_FILE}" ]]; then
+      echo "[OK] ADB keys generated: ${ADB_KEY_FILE}" >&2
+    else
+      echo "ERROR: Failed to generate ADB keys. Run 'adb devices' manually, then retry." >&2
+      exit 1
+    fi
+  else
+    echo "ERROR: 'adb' not found in PATH. Install Android SDK platform-tools and run 'adb devices'." >&2
+    exit 1
+  fi
+else
+  echo "[OK] ADB key found: ${ADB_KEY_FILE}"
+fi
+
 # ── Аргументы ────────────────────────────────────────────────────────────────
 INSTANCE_ID=1
 ENV_FILE=".env"

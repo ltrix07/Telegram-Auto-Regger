@@ -59,6 +59,8 @@ class DockerAndroidController:
         self.adb_path = str(adb_path or adb_cfg.get("adb_path", "adb")).strip() or "adb"
         self.poll_interval_seconds = max(float(poll_interval_seconds), 0.2)
         self.country_code = str(country_code).strip().upper() if country_code else None
+        # Pre-authorized ADB public key for ro.secure=1 containers
+        self.adb_keys_path = Path.home() / ".android" / "adbkey.pub"
 
     def _compose_base_command(self) -> list[str]:
         command = list(self.compose_command)
@@ -120,6 +122,19 @@ class DockerAndroidController:
         external bash scripts.
         """
         env: dict[str, str] = {}
+
+        # Inject ADB public key path so docker-compose can bind-mount it into the container.
+        # Required for ro.secure=1: Android refuses ADB connections without a pre-authorized key.
+        if self.adb_keys_path.exists():
+            env["ADB_KEYS_PATH"] = str(self.adb_keys_path)
+            LOGGER.info("ADB key passthrough enabled: %s", self.adb_keys_path)
+        else:
+            LOGGER.warning(
+                "ADB public key not found at %s. "
+                "Container will reject ADB connections (ro.secure=1). "
+                "Run `adb devices` on the host to generate the key.",
+                self.adb_keys_path,
+            )
 
         if self.country_code:
             from .sim_spoofing import get_sim_env_for_country

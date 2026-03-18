@@ -102,6 +102,9 @@ services:
       - gsm.sim.operator.numeric=${SIM_NUMERIC:-25001}
       - gsm.sim.operator.alpha=${SIM_ALPHA:-MTS}
       - gsm.sim.operator.iso-country=${SIM_ISO:-ru}
+    # --- ADB Key Passthrough (ro.secure=1 требует pre-authorized ключ) ---
+    volumes:
+      - ${ADB_KEYS_PATH}:/data/misc/adb/adb_keys:ro
     environment:
       - TZ=${SYS_TIMEZONE:-Europe/Moscow}
       - ro.product.locale=${SYS_LOCALE:-ru-RU}
