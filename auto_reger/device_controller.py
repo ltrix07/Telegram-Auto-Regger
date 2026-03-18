@@ -928,6 +928,67 @@ class DeviceController:
             self.telegram_package = normalized
         self.prepare_device()
 
+    def _ensure_frida_server(self) -> None:
+        """Скачивает, пушит и запускает frida-server на эмуляторе."""
+        import frida
+        import lzma
+        import os
+        import urllib.request
+        import subprocess
+        
+        # 1. Проверяем, запущен ли уже frida-server
+        ps_output = self._adb("shell", "ps", "-A", check=False).stdout
+        if "frida-server" in ps_output:
+            LOGGER.info("frida-server is already running on %s", self.device_id)
+            return
+
+        LOGGER.info("frida-server is NOT running on %s. Installing...", self.device_id)
+        
+        # 2. Узнаем архитектуру эмулятора (arm64, x86, x86_64)
+        abi = self._adb("shell", "getprop", "ro.product.cpu.abi", check=False).stdout.strip()
+        arch = "arm64" if "arm64" in abi else "x86_64" if "x86_64" in abi else "x86"
+        if "armeabi" in abi and "arm64" not in abi:
+            arch = "arm"
+            
+        frida_version = frida.__version__
+        server_filename = f"frida-server-{frida_version}-android-{arch}"
+        local_path = os.path.join(self.debug_dir, "frida-server")
+
+        # 3. Скачиваем бинарник (один раз на хост-сервер, если его еще нет)
+        if not os.path.exists(local_path):
+            self.debug_dir.mkdir(parents=True, exist_ok=True)
+            url = f"https://github.com/frida/frida/releases/download/{frida_version}/{server_filename}.xz"
+            LOGGER.info(f"Downloading {server_filename} from GitHub...")
+            try:
+                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req) as response:
+                    with open(local_path + ".xz", "wb") as f:
+                        f.write(response.read())
+                
+                # Распаковываем .xz
+                with lzma.open(local_path + ".xz") as f_in, open(local_path, "wb") as f_out:
+                    f_out.write(f_in.read())
+                os.chmod(local_path, 0o755)
+                os.remove(local_path + ".xz")
+            except Exception as e:
+                raise RuntimeError(f"Failed to download frida-server: {e}")
+
+        # 4. Закидываем на эмулятор
+        LOGGER.info("Pushing frida-server to emulator...")
+        self._adb("push", local_path, "/data/local/tmp/frida-server")
+        self._adb("shell", "chmod", "755", "/data/local/tmp/frida-server")
+        
+        # 5. Убиваем старые зависшие процессы (на всякий случай) и запускаем новый в фоне
+        self._adb("shell", "killall", "-9", "frida-server", check=False)
+        LOGGER.info("Starting frida-server in background...")
+        
+        # Запускаем через Popen, чтобы не блокировать выполнение питон-скрипта
+        cmd = [self.adb_path, "-s", self.device_id, "shell", "/data/local/tmp/frida-server"]
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # Даем серверу 3 секунды на инициализацию портов
+        time.sleep(3.0)
+
     def launch_telegram(self) -> None:
         """
         Launch Telegram by dynamically querying the OS and injecting Frida hook.
@@ -957,6 +1018,8 @@ class DeviceController:
                  LOGGER.error("No known Telegram package found in 'pm list packages'!")
             
         LOGGER.info("Dynamically set Telegram package to: %s", self.telegram_package)
+
+        self._ensure_frida_server()
 
         # 2. Агрессивный запуск через Frida для подмены SafetyNet
         js_code = """
