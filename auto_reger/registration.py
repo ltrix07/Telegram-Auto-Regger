@@ -2,6 +2,8 @@ import base64
 import logging
 import re
 import time
+import random
+import frida
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
 from auto_reger.device_controller import DeviceController
@@ -98,7 +100,10 @@ class TelegramRegistrator:
             national_number = self._extract_local_number(full_phone_number, normalized_code)
 
             self.device_controller.cleanup_telegram()
-            self.device_controller.open_telegram()
+            
+            expected_package = str(getattr(self.device_controller, "telegram_package", "")).strip() or self.TELEGRAM_PACKAGE
+            self._frida_session = self._inject_frida_and_start(expected_package)
+            
             self._ensure_telegram_opened()
 
             self._click_any(self.START_BUTTON_SELECTORS, "Start Messaging button")
@@ -136,6 +141,42 @@ class TelegramRegistrator:
                 with open(file_name, "wb") as f:
                     f.write(base64.b64decode(video_data))
                 LOGGER.info(f"Screen recording saved to {file_name}")
+
+    def _inject_frida_and_start(self, package_name: str) -> 'frida.core.Session':
+        """Запускает Telegram и внедряет хук для обхода локальной проверки Play Integrity/SafetyNet."""
+        js_code = """
+        Java.perform(function () {
+            var JSONObject = Java.use('org.json.JSONObject');
+            
+            JSONObject.optBoolean.overload('java.lang.String').implementation = function (key) {
+                if (key === 'basicIntegrity' || key === 'ctsProfileMatch') {
+                    send('Spoofing SafetyNet check: ' + key + ' -> true');
+                    return true;
+                }
+                return this.optBoolean(key);
+            };
+        });
+        """
+        
+        # Получаем доступ к USB-устройству (эмулятору)
+        device = frida.get_usb_device(timeout=10) 
+        
+        # Запускаем приложение с нуля (spawn), чтобы успеть перехватить классы до их загрузки
+        pid = device.spawn([package_name])
+        session = device.attach(pid)
+        
+        script = session.create_script(js_code)
+        
+        def on_message(message, data):
+            if message['type'] == 'send':
+                LOGGER.info(f"[FRIDA] {message['payload']}")
+                
+        script.on('message', on_message)
+        script.load()
+        
+        # Возобновляем процесс приложения
+        device.resume(pid)
+        return session
 
     def _ensure_telegram_opened(self) -> None:
         expected_package = (
@@ -211,14 +252,18 @@ class TelegramRegistrator:
         description: str,
         timeout: float = UI_TIMEOUT_SECONDS,
     ) -> None:
-        last_error: Optional[Exception] = None
-        for selector_variant in self._selector_variants(selector):
-            try:
-                self.device_controller.fill_text(selector_variant, text, timeout=timeout)
-                return
-            except Exception as exc:
-                last_error = exc
-        raise RegistrationError(f"{description} was not found within 10 seconds.") from last_error
+        """Вводит текст посимвольно с имитацией человеческих задержек."""
+        # Кликаем, чтобы установить фокус на поле
+        self.click(selector, timeout=timeout)
+        time.sleep(random.uniform(0.3, 0.6))  # Пауза перед началом набора
+        
+        for char in text:
+            # Если вы используете uiautomator2 (d - это ваш инстанс uiautomator):
+            # self.d.send_keys(char)
+            
+            # Если используете чистый ADB (замените на ваш метод вызова adb shell):
+            self.adb_execute(f"shell input text '{char}'")            
+            time.sleep(random.uniform(0.08, 0.35))
 
     def _click_any(self, selectors: Iterable[Dict[str, Any]], description: str) -> None:
         if self._try_click_any(selectors, timeout=self.UI_TIMEOUT_SECONDS):
