@@ -4,6 +4,7 @@ import logging
 import os
 import secrets
 import shlex
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -59,10 +60,6 @@ class DockerAndroidController:
         self.adb_path = str(adb_path or adb_cfg.get("adb_path", "adb")).strip() or "adb"
         self.poll_interval_seconds = max(float(poll_interval_seconds), 0.2)
         self.country_code = str(country_code).strip().upper() if country_code else None
-        # Pre-authorized ADB public key for ro.secure=1 containers.
-        # Prefer ~/.android/adbkey.pub; fall back to ./adb_keys in the project root.
-        system_key = Path.home() / ".android" / "adbkey.pub"
-        self.adb_keys_path = system_key if system_key.exists() else self.workdir / "adb_keys"
 
     def _compose_base_command(self) -> list[str]:
         command = list(self.compose_command)
@@ -125,12 +122,20 @@ class DockerAndroidController:
         """
         env: dict[str, str] = {}
 
-        # Inject ADB public key path so docker-compose can bind-mount it into the container.
-        # Required for ro.secure=1: Android refuses ADB connections without a pre-authorized key.
-        if not self.adb_keys_path.exists():
+        # Copy the ADB public key into workdir/adb_keys so Docker can mount it
+        # via a path relative to docker-compose.yml (ADB_KEYS_PATH = "adb_keys").
+        # An absolute host path like ~/.android/adbkey.pub would not work when the
+        # autoreger itself runs inside a container — the path wouldn't exist on the host.
+        dest = self.workdir / "adb_keys"
+        system_key = Path.home() / ".android" / "adbkey.pub"
+
+        if system_key.exists():
+            shutil.copy2(system_key, dest)
+            LOGGER.info("Copied system ADB key %s → %s", system_key, dest)
+        else:
             LOGGER.info(
                 "ADB key not found at %s — running `adb devices` to trigger key generation",
-                self.adb_keys_path,
+                system_key,
             )
             try:
                 subprocess.run(
@@ -141,19 +146,19 @@ class DockerAndroidController:
                 )
             except Exception:
                 LOGGER.debug("adb devices failed; key generation skipped", exc_info=True)
-            # After `adb devices` the system key may now exist; refresh the path.
-            system_key = Path.home() / ".android" / "adbkey.pub"
             if system_key.exists():
-                self.adb_keys_path = system_key
-            elif not self.adb_keys_path.exists():
+                shutil.copy2(system_key, dest)
+                LOGGER.info("Copied newly generated ADB key %s → %s", system_key, dest)
+            else:
                 LOGGER.warning(
                     "ADB public key still not found at %s. "
                     "Container will reject ADB connections (ro.secure=1).",
-                    self.adb_keys_path,
+                    system_key,
                 )
 
-        env["ADB_KEYS_PATH"] = str(self.adb_keys_path)
-        LOGGER.info("ADB key passthrough: %s (exists=%s)", self.adb_keys_path, self.adb_keys_path.exists())
+        # Always pass a relative path so Docker Compose resolves it next to docker-compose.yml.
+        env["ADB_KEYS_PATH"] = "adb_keys"
+        LOGGER.info("ADB key passthrough: adb_keys (exists=%s)", dest.exists())
 
         if self.country_code:
             from .sim_spoofing import get_sim_env_for_country
