@@ -3,6 +3,7 @@
 import logging
 import os
 import random
+import frida
 import re
 import secrets
 import shlex
@@ -929,8 +930,7 @@ class DeviceController:
 
     def launch_telegram(self) -> None:
         """
-        Launch Telegram by dynamically querying the OS for the exact Launch Activity
-        and using aggressive foreground start flags for Android 11+.
+        Launch Telegram by dynamically querying the OS and injecting Frida hook.
         """
         LOGGER.info("Launching Telegram on %s", self.device_id)
         self.invalidate_ui_dump_cache()
@@ -942,13 +942,11 @@ class DeviceController:
         # 1. Динамически узнаем реальное имя установленного пакета
         installed_pkgs = self._adb("shell", "pm", "list", "packages", check=False).stdout
         
-        # Prioritize official org.telegram.messenger from Google Play
         if "package:org.telegram.messenger" in installed_pkgs:
             self.telegram_package = "org.telegram.messenger"
         elif "package:org.telegram.messenger.web" in installed_pkgs:
             self.telegram_package = "org.telegram.messenger.web"
         else:
-            # Fallback to find any known candidate
             found = False
             for pkg_candidate in self.TELEGRAM_PACKAGE_CANDIDATES:
                 if f"package:{pkg_candidate}" in installed_pkgs:
@@ -960,25 +958,54 @@ class DeviceController:
             
         LOGGER.info("Dynamically set Telegram package to: %s", self.telegram_package)
 
-        # 2. Спрашиваем у самого Android точное имя стартового экрана
-        resolve_cmd = ["shell", "cmd", "package", "resolve-activity", "--brief", self.telegram_package]
-        resolve_output = self._adb(*resolve_cmd, check=False).stdout.strip()
-        
-        # Парсим последнюю строку ответа (там будет пакет/класс)
-        main_activity = resolve_output.split('\n')[-1].strip()
-        LOGGER.info("System resolved main activity to: %s", main_activity)
+        # 2. Агрессивный запуск через Frida для подмены SafetyNet
+        js_code = """
+        Java.perform(function () {
+            var JSONObject = Java.use('org.json.JSONObject');
+            JSONObject.optBoolean.overload('java.lang.String').implementation = function (key) {
+                if (key === 'basicIntegrity' || key === 'ctsProfileMatch') {
+                    send('Spoofing SafetyNet check: ' + key + ' -> true');
+                    return true;
+                }
+                return this.optBoolean(key);
+            };
+        });
+        """
 
-        # 3. Агрессивный запуск с обходом ограничений фона (Android 11)
-        launch_cmd = [
-            "shell", "am", "start", "-W", "-n", main_activity,
-            "-a", "android.intent.action.MAIN",
-            "-c", "android.intent.category.LAUNCHER",
-            "--windowingMode", "1"
-        ]
-        
-        LOGGER.info("Sending aggressive start intent...")
-        self._adb(*launch_cmd, check=False)
+        try:
+            LOGGER.info("Starting Telegram via Frida on %s...", self.device_id)
+            # ВАЖНО: Используем get_device(self.device_id) для работы с TCP/Docker эмуляторами!
+            device = frida.get_device(self.device_id, timeout=10)
+            pid = device.spawn([self.telegram_package])
 
+            # Сохраняем сессию в атрибут класса, чтобы сборщик мусора её не убил
+            self._frida_session = device.attach(pid)
+            script = self._frida_session.create_script(js_code)
+
+            def on_message(message, data):
+                if message['type'] == 'send':
+                    LOGGER.info(f"[FRIDA] {message['payload']}")
+
+            script.on('message', on_message)
+            script.load()
+            device.resume(pid)
+            LOGGER.info("Frida injection successful. Waiting for UI...")
+
+        except Exception as e:
+            LOGGER.error("Frida injection failed: %s. Falling back to ADB start...", e)
+            # Резервный запуск через ADB, если Frida недоступна
+            resolve_cmd = ["shell", "cmd", "package", "resolve-activity", "--brief", self.telegram_package]
+            resolve_output = self._adb(*resolve_cmd, check=False).stdout.strip()
+            main_activity = resolve_output.split('\n')[-1].strip()
+            launch_cmd = [
+                "shell", "am", "start", "-W", "-n", main_activity,
+                "-a", "android.intent.action.MAIN",
+                "-c", "android.intent.category.LAUNCHER",
+                "--windowingMode", "1"
+            ]
+            self._adb(*launch_cmd, check=False)
+
+        # 3. Ожидание загрузки интерфейса
         LOGGER.info("Waiting for app interface to load (first launch may take 60+ seconds)...")
         deadline = time.time() + 60.0
         app_ready = False
