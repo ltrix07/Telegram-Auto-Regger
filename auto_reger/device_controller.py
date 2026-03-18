@@ -983,7 +983,7 @@ class DeviceController:
         LOGGER.info("Starting frida-server in background...")
         
         # Запускаем через Popen, чтобы не блокировать выполнение питон-скрипта
-        cmd = [self.adb_path, "-s", self.device_id, "shell", "su", "0", "/data/local/tmp/frida-server"]
+        cmd = [self.adb_path, "-s", self.device_id, "shell", "/data/local/tmp/frida-server &"]
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         # Даем серверу 3 секунды на инициализацию портов
