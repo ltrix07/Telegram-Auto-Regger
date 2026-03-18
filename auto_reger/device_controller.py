@@ -985,9 +985,27 @@ class DeviceController:
         # Запускаем через Popen, чтобы не блокировать выполнение питон-скрипта
         cmd = [self.adb_path, "-s", self.device_id, "shell", "/data/local/tmp/frida-server"]
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        self._adb("forward", "tcp:27042", "tcp:27042", check=False)
         
         # Даем серверу 3 секунды на инициализацию портов
+        time.sleep(3.0)
+
+        # Пробрасываем порт frida-server с эмулятора на хост
+        fwd_result = self._adb("forward", "tcp:27042", "tcp:27042", check=False)
+        LOGGER.info("ADB forward tcp:27042 result: rc=%d stdout=%r stderr=%r",
+                    fwd_result.returncode, fwd_result.stdout.strip(), fwd_result.stderr.strip())
+
+        # Проверяем что frida-server реально запустился
+        ps_after = self._adb("shell", "ps", "-A", check=False).stdout
+        frida_running = "frida-server" in ps_after
+        LOGGER.info("frida-server process check after start: running=%s", frida_running)
+        if not frida_running:
+            LOGGER.error("frida-server did NOT start! ps output snippet: %s",
+                         [l for l in ps_after.splitlines() if "frida" in l.lower()])
+
+        # Проверяем что порт 27042 слушается внутри эмулятора
+        ss_out = self._adb("shell", "ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null", check=False).stdout
+        port_listening = "27042" in ss_out
+        LOGGER.info("frida-server port 27042 listening check: %s", port_listening)
         time.sleep(3.0)
 
     def launch_telegram(self) -> None:
@@ -1074,7 +1092,7 @@ class DeviceController:
             LOGGER.info("Frida injection successful. Waiting for UI...")
 
         except Exception as e:
-            LOGGER.error("Frida injection failed: %s. Falling back to ADB start...", e)
+            LOGGER.exception("Frida injection failed. Falling back to ADB start...")
             # Резервный запуск через ADB, если Frida недоступна
             resolve_cmd = ["shell", "cmd", "package", "resolve-activity", "--brief", self.telegram_package]
             resolve_output = self._adb(*resolve_cmd, check=False).stdout.strip()
