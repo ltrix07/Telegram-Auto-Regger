@@ -983,11 +983,14 @@ class DeviceController:
         LOGGER.info("Starting frida-server in background...")
         
         # Запускаем через Popen, чтобы не блокировать выполнение питон-скрипта
-        cmd = [self.adb_path, "-s", self.device_id, "shell", "/data/local/tmp/frida-server"]
+        cmd = [self.adb_path, "-s", self.device_id, "shell", "su", "0", "/data/local/tmp/frida-server"]
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         # Даем серверу 3 секунды на инициализацию портов
         time.sleep(3.0)
+
+        whoami = self._adb("shell", "su 0 whoami", check=False).stdout.strip()
+        LOGGER.info("frida-server running as: checking su availability: %s", whoami)
 
         # Пробрасываем порт frida-server с эмулятора на хост
         fwd_result = self._adb("forward", "tcp:27042", "tcp:27042", check=False)
