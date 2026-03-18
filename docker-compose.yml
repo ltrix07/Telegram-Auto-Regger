@@ -64,7 +64,7 @@ services:
   # HW identifiers: генерируются DockerAndroidController.start_container()
   # ─────────────────────────────────────────────────────────────
   android_1:
-    image: redroid/redroid:11.0.0-user
+    image: redroid/redroid:11.0.0-latest
     privileged: true
     shm_size: '2gb'
     depends_on:
