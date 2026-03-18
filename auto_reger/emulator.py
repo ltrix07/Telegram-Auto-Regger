@@ -137,6 +137,7 @@ class DockerAndroidController:
                 "ADB key not found at %s — running `adb devices` to trigger key generation",
                 system_key,
             )
+            system_key.parent.mkdir(parents=True, exist_ok=True)
             try:
                 subprocess.run(
                     [self.adb_path, "devices"],
@@ -156,8 +157,9 @@ class DockerAndroidController:
                     system_key,
                 )
 
-        # Always pass a relative path so Docker Compose resolves it next to docker-compose.yml.
-        env["ADB_KEYS_PATH"] = "adb_keys"
+        # Use "./" prefix so Docker Compose treats this as a bind mount (folder),
+        # not a named volume. Without "./" Docker errors: "undefined volume adb_keys".
+        env["ADB_KEYS_PATH"] = "./adb_keys"
         LOGGER.info("ADB key passthrough: adb_keys (exists=%s)", dest.exists())
 
         if self.country_code:
