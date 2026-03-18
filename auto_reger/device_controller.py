@@ -6,6 +6,8 @@ import random
 import frida
 import re
 import secrets
+import urllib
+import lzma
 import shlex
 import signal
 import subprocess
@@ -929,13 +931,8 @@ class DeviceController:
         self.prepare_device()
 
     def _ensure_frida_server(self) -> None:
-        """Скачивает, пушит и запускает frida-server на эмуляторе."""
-        import frida
-        import lzma
-        import os
-        import urllib.request
-        import subprocess
-        
+        """Скачивает, пушит и запускает frida-server на эмуляторе от root."""
+
         # 1. Проверяем, запущен ли уже frida-server
         ps_output = self._adb("shell", "ps", "-A", check=False).stdout
         if "frida-server" in ps_output:
@@ -943,81 +940,76 @@ class DeviceController:
             return
 
         LOGGER.info("frida-server is NOT running on %s. Installing...", self.device_id)
-        
-        # 2. Узнаем архитектуру эмулятора (arm64, x86, x86_64)
+
+        # 2. Узнаем архитектуру эмулятора
         abi = self._adb("shell", "getprop", "ro.product.cpu.abi", check=False).stdout.strip()
-        arch = "arm64" if "arm64" in abi else "x86_64" if "x86_64" in abi else "x86"
-        if "armeabi" in abi and "arm64" not in abi:
+        if "arm64" in abi:
+            arch = "arm64"
+        elif "x86_64" in abi:
+            arch = "x86_64"
+        elif "armeabi" in abi:
             arch = "arm"
-            
+        else:
+            arch = "x86"
+        LOGGER.info("Detected ABI: %s → frida arch: %s", abi, arch)
+
         frida_version = frida.__version__
         server_filename = f"frida-server-{frida_version}-android-{arch}"
         local_path = os.path.join(self.debug_dir, "frida-server")
 
-        # 3. Скачиваем бинарник (один раз на хост-сервер, если его еще нет)
+        # 3. Скачиваем бинарник если его ещё нет на хосте
         if not os.path.exists(local_path):
             self.debug_dir.mkdir(parents=True, exist_ok=True)
             url = f"https://github.com/frida/frida/releases/download/{frida_version}/{server_filename}.xz"
-            LOGGER.info(f"Downloading {server_filename} from GitHub...")
+            LOGGER.info("Downloading %s from GitHub...", server_filename)
             try:
-                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
                 with urllib.request.urlopen(req) as response:
                     with open(local_path + ".xz", "wb") as f:
                         f.write(response.read())
-                
-                # Распаковываем .xz
                 with lzma.open(local_path + ".xz") as f_in, open(local_path, "wb") as f_out:
                     f_out.write(f_in.read())
                 os.chmod(local_path, 0o755)
                 os.remove(local_path + ".xz")
+                LOGGER.info("frida-server downloaded and unpacked to %s", local_path)
             except Exception as e:
                 raise RuntimeError(f"Failed to download frida-server: {e}")
 
-        # 4. Закидываем на эмулятор
+        # 4. Пушим на эмулятор и выставляем права
         LOGGER.info("Pushing frida-server to emulator...")
         self._adb("push", local_path, "/data/local/tmp/frida-server")
         self._adb("shell", "chmod", "755", "/data/local/tmp/frida-server")
 
-        selinux_result = self._adb("shell", "setenforce", "0", check=False)
-        LOGGER.info("SELinux set to permissive: rc=%d", selinux_result.returncode)
+        # 5. Убиваем старые инстансы
+        self._adb("shell", "su 0 killall -9 frida-server", check=False)
 
-        # Проверяем результат
-        getenforce = self._adb("shell", "getenforce", check=False).stdout.strip()
-        LOGGER.info("SELinux status: %s", getenforce)
-        
-        # 5. Убиваем старые зависшие процессы (на всякий случай) и запускаем новый в фоне
-        self._adb("shell", "killall", "-9", "frida-server", check=False)
-        LOGGER.info("Starting frida-server in background...")
-        
-        # Запускаем через Popen, чтобы не блокировать выполнение питон-скрипта
-        cmd = [self.adb_path, "-s", self.device_id, "shell", "/data/local/tmp/frida-server"]
+        # 6. Запускаем frida-server от root одной строкой (& работает только внутри sh -c)
+        LOGGER.info("Starting frida-server in background as root...")
+        cmd = [
+            self.adb_path, "-s", self.device_id,
+            "shell", "su 0 /data/local/tmp/frida-server > /dev/null 2>&1 &"
+        ]
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(3.0)
-        
-        # Даем серверу 3 секунды на инициализацию портов
+
+        # 7. Даём серверу время на инициализацию
         time.sleep(3.0)
 
-        whoami = self._adb("shell", "su 0 whoami", check=False).stdout.strip()
-        LOGGER.info("frida-server running as: checking su availability: %s", whoami)
-
-        # Пробрасываем порт frida-server с эмулятора на хост
+        # 8. Пробрасываем порт с эмулятора на хост
         fwd_result = self._adb("forward", "tcp:27042", "tcp:27042", check=False)
-        LOGGER.info("ADB forward tcp:27042 result: rc=%d stdout=%r stderr=%r",
-                    fwd_result.returncode, fwd_result.stdout.strip(), fwd_result.stderr.strip())
+        LOGGER.info("ADB forward tcp:27042: rc=%d stdout=%r", fwd_result.returncode, fwd_result.stdout.strip())
 
-        # Проверяем что frida-server реально запустился
-        ps_after = self._adb("shell", "ps", "-A", check=False).stdout
-        frida_running = "frida-server" in ps_after
-        LOGGER.info("frida-server process check after start: running=%s", frida_running)
-        if not frida_running:
-            LOGGER.error("frida-server did NOT start! ps output snippet: %s",
-                         [l for l in ps_after.splitlines() if "frida" in l.lower()])
+        # 9. Диагностика — проверяем процесс и пользователя
+        ps_after = self._adb("shell", "ps -A -o USER,PID,NAME", check=False).stdout
+        frida_lines = [l for l in ps_after.splitlines() if "frida" in l.lower()]
+        if frida_lines:
+            LOGGER.info("frida-server process: %s", frida_lines)
+        else:
+            LOGGER.error("frida-server did NOT start!")
+            raise RuntimeError("frida-server failed to start on %s" % self.device_id)
 
-        # Проверяем что порт 27042 слушается внутри эмулятора
+        # 10. Проверяем что порт слушается
         ss_out = self._adb("shell", "ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null", check=False).stdout
-        port_listening = "27042" in ss_out
-        LOGGER.info("frida-server port 27042 listening check: %s", port_listening)
-        time.sleep(3.0)
+        LOGGER.info("frida-server port 27042 listening: %s", "27042" in ss_out)
 
     def launch_telegram(self) -> None:
         """
