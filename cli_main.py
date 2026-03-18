@@ -43,69 +43,16 @@ LAST_CYCLE_ALERT_AT: dict[str, float] = {}
 ALERT_SEND_LOCK = threading.Lock()
 ALLOWED_OPERATORS = "tmobile,att,verizon,lycamobile,sprint"
 
+# TEMP: зафиксирован на Pixel 5 для диагностики таймаута загрузки
 DEVICE_PROFILES = [
     {
-        "ro.product.model": "SM-S908E",
-        "ro.product.manufacturer": "samsung",
-        "ro.product.brand": "samsung",
-        "ro.product.name": "b0s",
-        "ro.product.device": "b0s",
-        "ro.build.fingerprint": "samsung/b0s/b0s:13/TP1A.220624.014/S908EXXS7DXD3:user/release-keys",
-        "ro.build.description": "b0s-user 13 TP1A.220624.014 S908EXXS7DXD3 release-keys",
-    },
-    {
-        "ro.product.model": "Pixel 6",
+        "ro.product.model": "Pixel 5",
         "ro.product.manufacturer": "Google",
         "ro.product.brand": "google",
-        "ro.product.name": "oriole",
-        "ro.product.device": "oriole",
-        "ro.build.fingerprint": "google/oriole/oriole:13/T2B1.221118.006/9216481:user/release-keys",
-        "ro.build.description": "oriole-user 13 T2B1.221118.006 9216481 release-keys",
-    },
-    {
-        "ro.product.model": "Pixel 7",
-        "ro.product.manufacturer": "Google",
-        "ro.product.brand": "google",
-        "ro.product.name": "panther",
-        "ro.product.device": "panther",
-        "ro.build.fingerprint": "google/panther/panther:13/TQ1A.230105.002/9325679:user/release-keys",
-        "ro.build.description": "panther-user 13 TQ1A.230105.002 9325679 release-keys",
-    },
-    {
-        "ro.product.model": "OnePlus 9",
-        "ro.product.manufacturer": "OnePlus",
-        "ro.product.brand": "OnePlus",
-        "ro.product.name": "OnePlus9",
-        "ro.product.device": "OnePlus9",
-        "ro.build.fingerprint": "OnePlus/OnePlus9/OnePlus9:12/RKQ1.211112.001/2201112233:user/release-keys",
-        "ro.build.description": "OnePlus9-user 12 RKQ1.211112.001 2201112233 release-keys",
-    },
-    {
-        "ro.product.model": "SM-G998B",
-        "ro.product.manufacturer": "samsung",
-        "ro.product.brand": "samsung",
-        "ro.product.name": "p3s",
-        "ro.product.device": "p3s",
-        "ro.build.fingerprint": "samsung/p3s/p3s:13/TP1A.220624.014/G998BXXS9FXC9:user/release-keys",
-        "ro.build.description": "p3s-user 13 TP1A.220624.014 G998BXXS9FXC9 release-keys",
-    },
-    {
-        "ro.product.model": "Xiaomi 2201123G",
-        "ro.product.manufacturer": "Xiaomi",
-        "ro.product.brand": "Xiaomi",
-        "ro.product.name": "veux",
-        "ro.product.device": "veux",
-        "ro.build.fingerprint": "Xiaomi/veux_global/veux:13/SKQ1.2201123.001/V14.0.5.0.TKCMIXM:user/release-keys",
-        "ro.build.description": "veux_global-user 13 SKQ1.2201123.001 V14.0.5.0.TKCMIXM release-keys",
-    },
-    {
-        "ro.product.model": "SM-A528B",
-        "ro.product.manufacturer": "samsung",
-        "ro.product.brand": "samsung",
-        "ro.product.name": "a52sxq",
-        "ro.product.device": "a52sxq",
-        "ro.build.fingerprint": "samsung/a52sxq/a52sxq:13/TP1A.220624.014/A528BXXS6FXC2:user/release-keys",
-        "ro.build.description": "a52sxq-user 13 TP1A.220624.014 A528BXXS6FXC2 release-keys",
+        "ro.product.name": "redfin",
+        "ro.product.device": "redfin",
+        "ro.build.fingerprint": "google/redfin/redfin:11/RQ3A.211001.001/7641976:user/release-keys",
+        "ro.build.description": "redfin-user 11 RQ3A.211001.001 7641976 release-keys",
     },
 ]
 

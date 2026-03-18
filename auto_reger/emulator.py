@@ -259,6 +259,10 @@ class DockerAndroidController:
                 )
                 continue
             status = result.stdout.strip()
+            print(
+                f"[boot_check] attempt={attempt} udid={normalized_udid} "
+                f"rc={result.returncode} stdout={result.stdout!r} stderr={result.stderr.strip()!r}"
+            )
             LOGGER.debug(
                 "Boot check attempt %s on %s: return_code=%s, status=%r, stderr=%r",
                 attempt,

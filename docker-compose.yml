@@ -1,37 +1,7 @@
 services:
 
   # ─────────────────────────────────────────────────────────────
-  # Internal DNS — dnsmasq в изолированной подсети 172.20.0.0/24
-  # Блокирует внешние Google-вызовы и логирует весь трафик
-  # ─────────────────────────────────────────────────────────────
-  dnsmasq:
-    image: andyshinn/dnsmasq:2.76
-    cap_add:
-      - NET_ADMIN
-    command: >
-      --no-resolv
-      --no-hosts
-      --keep-in-foreground
-      --log-queries
-      --log-facility=-
-      --server=8.8.8.8
-      --address=/googleapis.com/0.0.0.0
-      --address=/google-analytics.com/0.0.0.0
-      --address=/googletagmanager.com/0.0.0.0
-      --address=/doubleclick.net/0.0.0.0
-    healthcheck:
-      test: ["CMD-SHELL", "nslookup example.com 127.0.0.1 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      isolated_net:
-        ipv4_address: 172.20.0.53
-
-  # ─────────────────────────────────────────────────────────────
   # Сетевой шлюз — tun2socks проксирует трафик Android-контейнера
-  # DNS переключён на внутренний резолвер (dnsmasq)
   # ─────────────────────────────────────────────────────────────
   tun2socks_1:
     image: xjasonlyu/tun2socks:v2.5.1
@@ -44,10 +14,8 @@ services:
     ports:
       - "5555:5555"
     dns:
-      - 172.20.0.53   # Внутренний dnsmasq — без публичных DNS-утечек
-    depends_on:
-      dnsmasq:
-        condition: service_healthy
+      - 8.8.8.8
+      - 1.1.1.1
     healthcheck:
       test: ["CMD-SHELL", "pgrep tun2socks"]
       interval: 10s
@@ -75,10 +43,6 @@ services:
       # --- Display ---
       - androidboot.redroid_width=720
       - androidboot.redroid_height=1280
-      - androidboot.redroid_fps=15
-      - androidboot.redroid_ro=1
-      # --- GPU: программный рендеринг (ядро 6.8, без GPU) ---
-      - redroid.gpu_mode=guest
       # --- Device Spoofing (задаётся через env из DEVICE_PROFILES) ---
       - ro.product.model=${RO_PRODUCT_MODEL:-Pixel 5}
       - ro.product.brand=${RO_PRODUCT_BRAND:-google}
@@ -93,13 +57,6 @@ services:
       # --- Dynamic HW identifiers (генерируются DockerAndroidController) ---
       - ro.serialno=${DEVICE_SERIAL:-SERIAL}
       - ro.build.id=${DEVICE_BUILD_ID:-BUILD}
-      # --- Hardware & Security ---
-      - ro.hardware.egl=adreno
-      - ro.hardware.vulkan=adreno
-      - ro.secure=1
-      - ro.debuggable=0
-      - ro.kernel.qemu=0
-      - ro.zygote=zygote64_32
       # --- SIM (соответствует ГЕО прокси, задаётся через get_sim_env_for_country) ---
       - gsm.sim.operator.numeric=${SIM_NUMERIC:-25001}
       - gsm.sim.operator.alpha=${SIM_ALPHA:-MTS}
@@ -112,15 +69,6 @@ services:
       - ro.product.locale=${SYS_LOCALE:-ru-RU}
       - persist.sys.timezone=${SYS_TIMEZONE:-Europe/Moscow}
 
-# ─────────────────────────────────────────────────────────────
-# Изолированная сеть с фиксированной подсетью
-# dnsmasq получает статический IP 172.20.0.53
-# ─────────────────────────────────────────────────────────────
 networks:
   isolated_net:
     driver: bridge
-    ipam:
-      driver: default
-      config:
-        - subnet: 172.20.0.0/24
-          gateway: 172.20.0.1
