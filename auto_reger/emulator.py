@@ -122,15 +122,14 @@ class DockerAndroidController:
         """
         env: dict[str, str] = {}
 
-        # Copy the ADB public key into workdir/adb_keys so Docker can mount it
-        # via a path relative to docker-compose.yml (ADB_KEYS_PATH = "adb_keys").
-        # An absolute host path like ~/.android/adbkey.pub would not work when the
-        # autoreger itself runs inside a container — the path wouldn't exist on the host.
+        # Ensure ./adb_keys directory exists so Docker bind mount never fails.
+        # Path is hardcoded in docker-compose.yml as ./adb_keys — no env var needed.
         dest = self.workdir / "adb_keys"
-        system_key = Path.home() / ".android" / "adbkey.pub"
+        dest.mkdir(parents=True, exist_ok=True)
 
+        system_key = Path.home() / ".android" / "adbkey.pub"
         if system_key.exists():
-            shutil.copy2(system_key, dest)
+            shutil.copy2(system_key, dest / "adbkey.pub")
             LOGGER.info("Copied system ADB key %s → %s", system_key, dest)
         else:
             LOGGER.info(
@@ -148,7 +147,7 @@ class DockerAndroidController:
             except Exception:
                 LOGGER.debug("adb devices failed; key generation skipped", exc_info=True)
             if system_key.exists():
-                shutil.copy2(system_key, dest)
+                shutil.copy2(system_key, dest / "adbkey.pub")
                 LOGGER.info("Copied newly generated ADB key %s → %s", system_key, dest)
             else:
                 LOGGER.warning(
@@ -156,11 +155,7 @@ class DockerAndroidController:
                     "Container will reject ADB connections (ro.secure=1).",
                     system_key,
                 )
-
-        # Use "./" prefix so Docker Compose treats this as a bind mount (folder),
-        # not a named volume. Without "./" Docker errors: "undefined volume adb_keys".
-        env["ADB_KEYS_PATH"] = "./adb_keys"
-        LOGGER.info("ADB key passthrough: adb_keys (exists=%s)", dest.exists())
+        LOGGER.info("ADB key dir: %s (exists=%s)", dest, dest.exists())
 
         if self.country_code:
             from .sim_spoofing import get_sim_env_for_country
