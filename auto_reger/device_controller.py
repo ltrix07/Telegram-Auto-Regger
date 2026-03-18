@@ -1154,7 +1154,7 @@ class DeviceController:
         LOGGER.info("Inputting phone number on Telegram UI")
 
         # Adaptive UI Polling to reach the phone input screen
-        deadline = time.time() + 35.0
+        deadline = time.time() + 75.0
         phone_screen_reached = False
         phone_number_resources = (
             *self.PHONE_COUNTRY_CODE_RESOURCE_ID_SUFFIXES,
