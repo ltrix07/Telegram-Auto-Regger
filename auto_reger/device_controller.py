@@ -1021,18 +1021,26 @@ class DeviceController:
 
         self._ensure_frida_server()
 
-        # 2. Агрессивный запуск через Frida для подмены SafetyNet
         js_code = """
-        Java.perform(function () {
-            var JSONObject = Java.use('org.json.JSONObject');
-            JSONObject.optBoolean.overload('java.lang.String').implementation = function (key) {
-                if (key === 'basicIntegrity' || key === 'ctsProfileMatch') {
-                    send('Spoofing SafetyNet check: ' + key + ' -> true');
-                    return true;
+        setTimeout(function() {
+            Java.perform(function () {
+                try {
+                    var JSONObject = Java.use('org.json.JSONObject');
+                    
+                    JSONObject.optBoolean.overload('java.lang.String').implementation = function (key) {
+                        if (key === 'basicIntegrity' || key === 'ctsProfileMatch') {
+                            send('Spoofing SafetyNet check: ' + key + ' -> true');
+                            return true;
+                        }
+                        return this.optBoolean(key);
+                    };
+                    
+                    send('SafetyNet hook loaded successfully!');
+                } catch (e) {
+                    send('Hook Error: ' + e);
                 }
-                return this.optBoolean(key);
-            };
-        });
+            });
+        }, 2000); // Ждем 2 секунды, пока классы Android полностью загрузятся
         """
 
         try:
