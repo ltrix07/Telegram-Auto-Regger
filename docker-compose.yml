@@ -75,8 +75,10 @@ services:
       # --- Display ---
       - androidboot.redroid_width=720
       - androidboot.redroid_height=1280
-      - androidboot.redroid_fps=30
+      - androidboot.redroid_fps=15
       - androidboot.redroid_ro=1
+      # --- GPU: программный рендеринг (ядро 6.8, без GPU) ---
+      - redroid.gpu_mode=guest
       # --- Device Spoofing (задаётся через env из DEVICE_PROFILES) ---
       - ro.product.model=${RO_PRODUCT_MODEL:-Pixel 5}
       - ro.product.brand=${RO_PRODUCT_BRAND:-google}

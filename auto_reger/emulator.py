@@ -196,6 +196,26 @@ class DockerAndroidController:
             timeout,
         )
 
+        # Сбрасываем залипший статус "offline" перед началом опроса
+        try:
+            subprocess.run(
+                [self.adb_path, "disconnect", normalized_udid],
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+        except Exception:
+            LOGGER.debug("adb disconnect failed before boot wait", exc_info=True)
+        try:
+            subprocess.run(
+                [self.adb_path, "connect", normalized_udid],
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+        except Exception:
+            LOGGER.debug("adb connect failed before boot wait", exc_info=True)
+
         deadline = time.monotonic() + int(timeout)
         attempt = 0
         while time.monotonic() < deadline:
