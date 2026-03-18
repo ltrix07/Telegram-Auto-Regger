@@ -932,7 +932,16 @@ class DeviceController:
 
     def _ensure_frida_server(self) -> None:
         """Скачивает, пушит и запускает frida-server на эмуляторе от root."""
-
+        suspicious_props = {
+            "ro.kernel.qemu": "0",
+            "ro.boot.qemu": "0", 
+            "ro.hardware": "qcom",
+            "ro.product.board": "redfin",
+        }
+        for prop, val in suspicious_props.items():
+            result = self._adb("shell", f"setprop {prop} {val}", check=False)
+            LOGGER.info("setprop %s=%s rc=%d", prop, val, result.returncode)
+            
         # 1. Проверяем, запущен ли уже frida-server
         ps_output = self._adb("shell", "ps", "-A", check=False).stdout
         if "frida-server" in ps_output:
@@ -1015,6 +1024,16 @@ class DeviceController:
         """
         Launch Telegram by dynamically querying the OS and injecting Frida hook.
         """
+        suspicious_props = {
+            "ro.kernel.qemu": "0",
+            "ro.boot.qemu": "0", 
+            "ro.hardware": "qcom",
+            "ro.product.board": "redfin",
+        }
+        for prop, val in suspicious_props.items():
+            result = self._adb("shell", f"setprop {prop} {val}", check=False)
+            LOGGER.info("setprop %s=%s rc=%d", prop, val, result.returncode)
+            
         LOGGER.info("Launching Telegram on %s", self.device_id)
         self.invalidate_ui_dump_cache()
         time.sleep(3.0)
@@ -1044,26 +1063,111 @@ class DeviceController:
         self._ensure_frida_server()
 
         js_code = """
-        setTimeout(function() {
-            Java.perform(function () {
-                try {
-                    var JSONObject = Java.use('org.json.JSONObject');
-                    
-                    JSONObject.optBoolean.overload('java.lang.String').implementation = function (key) {
-                        if (key === 'basicIntegrity' || key === 'ctsProfileMatch') {
-                            send('Spoofing SafetyNet check: ' + key + ' -> true');
-                            return true;
-                        }
-                        return this.optBoolean(key);
-                    };
-                    
-                    send('SafetyNet hook loaded successfully!');
-                } catch (e) {
-                    send('Hook Error: ' + e);
-                }
-            });
-        }, 2000); // Ждем 2 секунды, пока классы Android полностью загрузятся
-        """
+            setTimeout(function() {
+                Java.perform(function () {
+
+                    // ── 1. SafetyNet: JSONObject.optBoolean ──────────────────────────────
+                    try {
+                        var JSONObject = Java.use('org.json.JSONObject');
+                        JSONObject.optBoolean.overload('java.lang.String').implementation = function(key) {
+                            if (key === 'basicIntegrity' || key === 'ctsProfileMatch') {
+                                send('[FRIDA] SafetyNet spoof: ' + key + ' -> true');
+                                return true;
+                            }
+                            return this.optBoolean(key);
+                        };
+                        JSONObject.optBoolean.overload('java.lang.String', 'boolean').implementation = function(key, def) {
+                            if (key === 'basicIntegrity' || key === 'ctsProfileMatch') {
+                                send('[FRIDA] SafetyNet spoof (default): ' + key + ' -> true');
+                                return true;
+                            }
+                            return this.optBoolean(key, def);
+                        };
+                    } catch(e) { send('[FRIDA] SafetyNet hook error: ' + e); }
+
+                    // ── 2. SystemProperties — прячем признаки эмулятора ─────────────────
+                    try {
+                        var SystemProperties = Java.use('android.os.SystemProperties');
+                        SystemProperties.get.overload('java.lang.String').implementation = function(key) {
+                            var emulatorKeys = {
+                                'ro.kernel.qemu': '0',
+                                'ro.hardware': 'qcom',
+                                'ro.product.board': 'redfin',
+                                'ro.boot.qemu': '0',
+                                'ro.boot.hardware': 'qcom',
+                                'init.svc.qemu-props': '',
+                                'qemu.sf.lcd_density': '',
+                            };
+                            if (emulatorKeys.hasOwnProperty(key)) {
+                                send('[FRIDA] SystemProperties spoof: ' + key + ' -> ' + emulatorKeys[key]);
+                                return emulatorKeys[key];
+                            }
+                            return this.get(key);
+                        };
+                        SystemProperties.get.overload('java.lang.String', 'java.lang.String').implementation = function(key, def) {
+                            var emulatorKeys = {
+                                'ro.kernel.qemu': '0',
+                                'ro.hardware': 'qcom',
+                                'ro.product.board': 'redfin',
+                                'ro.boot.qemu': '0',
+                                'ro.boot.hardware': 'qcom',
+                            };
+                            if (emulatorKeys.hasOwnProperty(key)) {
+                                send('[FRIDA] SystemProperties spoof (def): ' + key);
+                                return emulatorKeys[key];
+                            }
+                            return this.get(key, def);
+                        };
+                    } catch(e) { send('[FRIDA] SystemProperties hook error: ' + e); }
+
+                    // ── 3. TelephonyManager — IMEI / DeviceId ────────────────────────────
+                    try {
+                        var TelephonyManager = Java.use('android.telephony.TelephonyManager');
+                        var fakeImei = '357673090590608';  // валидный Luhn IMEI
+
+                        TelephonyManager.getDeviceId.overload().implementation = function() {
+                            send('[FRIDA] getDeviceId spoofed');
+                            return fakeImei;
+                        };
+                        TelephonyManager.getImei.overload().implementation = function() {
+                            send('[FRIDA] getImei spoofed');
+                            return fakeImei;
+                        };
+                        TelephonyManager.getImei.overload('int').implementation = function(slot) {
+                            send('[FRIDA] getImei(slot) spoofed');
+                            return fakeImei;
+                        };
+                    } catch(e) { send('[FRIDA] TelephonyManager hook error: ' + e); }
+
+                    // ── 4. Build fields — прячем признаки эмулятора в Build ─────────────
+                    try {
+                        var Build = Java.use('android.os.Build');
+                        Build.FINGERPRINT.value = 'google/redfin/redfin:11/RQ3A.211001.001/7641976:user/release-keys';
+                        Build.MODEL.value = 'Pixel 5';
+                        Build.MANUFACTURER.value = 'Google';
+                        Build.BRAND.value = 'google';
+                        Build.DEVICE.value = 'redfin';
+                        Build.PRODUCT.value = 'redfin';
+                        Build.HARDWARE.value = 'qcom';
+                        Build.HOST.value = 'abfarm-release-rbe-00016';
+                        Build.TAGS.value = 'release-keys';
+                        Build.TYPE.value = 'user';
+                        send('[FRIDA] Build fields spoofed');
+                    } catch(e) { send('[FRIDA] Build hook error: ' + e); }
+
+                    // ── 5. Play Integrity API ────────────────────────────────────────────
+                    try {
+                        var StandardIntegrityManager = Java.use('com.google.android.play.core.integrity.StandardIntegrityManager');
+                        send('[FRIDA] StandardIntegrityManager found, patching...');
+                    } catch(e) {
+                        // Play Integrity может быть недоступен — не критично
+                        send('[FRIDA] Play Integrity not found (ok): ' + e);
+                    }
+
+                    send('[FRIDA] All hooks loaded successfully');
+                });
+            }, 1000);
+            """
 
         try:
             LOGGER.info("Starting Telegram via Frida on %s...", self.device_id)
