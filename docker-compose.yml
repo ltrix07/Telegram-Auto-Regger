@@ -89,8 +89,8 @@ services:
       - ro.build.description=${RO_BUILD_DESCRIPTION:-redfin-user 11 RQ3A.211001.001 7641976 release-keys}
       - ro.build.fingerprint=${RO_BUILD_FINGERPRINT:-google/redfin/redfin:11/RQ3A.211001.001/7641976:user/release-keys}
       # --- Dynamic HW identifiers (генерируются DockerAndroidController) ---
-      - ro.serialno=${DEVICE_SERIAL}
-      - ro.build.id=${DEVICE_BUILD_ID}
+      - ro.serialno=${DEVICE_SERIAL:-SERIAL}
+      - ro.build.id=${DEVICE_BUILD_ID:-BUILD}
       # --- Hardware & Security ---
       - ro.hardware.egl=adreno
       - ro.hardware.vulkan=adreno
@@ -104,7 +104,7 @@ services:
       - gsm.sim.operator.iso-country=${SIM_ISO:-ru}
     # --- ADB Key Passthrough (ro.secure=1 требует pre-authorized ключ) ---
     volumes:
-      - ${ADB_KEYS_PATH}:/data/misc/adb/adb_keys:ro
+      - ${ADB_KEYS_PATH:-./adb_keys}:/data/misc/adb/adb_keys:ro
     environment:
       - TZ=${SYS_TIMEZONE:-Europe/Moscow}
       - ro.product.locale=${SYS_LOCALE:-ru-RU}
