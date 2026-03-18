@@ -1,7 +1,40 @@
 services:
+
+  # ─────────────────────────────────────────────────────────────
+  # Internal DNS — dnsmasq в изолированной подсети 172.20.0.0/24
+  # Блокирует внешние Google-вызовы и логирует весь трафик
+  # ─────────────────────────────────────────────────────────────
+  dnsmasq:
+    image: andyshinn/dnsmasq:2.76
+    cap_add:
+      - NET_ADMIN
+    command: >
+      --no-resolv
+      --no-hosts
+      --keep-in-foreground
+      --log-queries
+      --log-facility=-
+      --server=8.8.8.8
+      --address=/googleapis.com/0.0.0.0
+      --address=/google-analytics.com/0.0.0.0
+      --address=/googletagmanager.com/0.0.0.0
+      --address=/doubleclick.net/0.0.0.0
+    healthcheck:
+      test: ["CMD-SHELL", "nslookup example.com 127.0.0.1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      isolated_net:
+        ipv4_address: 172.20.0.53
+
+  # ─────────────────────────────────────────────────────────────
+  # Сетевой шлюз — tun2socks проксирует трафик Android-контейнера
+  # DNS переключён на внутренний резолвер (dnsmasq)
+  # ─────────────────────────────────────────────────────────────
   tun2socks_1:
     image: xjasonlyu/tun2socks:v2.5.1
-    container_name: android_proxy_gateway_1
     command: --loglevel info --proxy ${PROXY_URL:-socks5://127.0.0.1:1080} --device tun0
     privileged: true
     cap_add:
@@ -11,57 +44,78 @@ services:
     ports:
       - "5555:5555"
     dns:
-      - 8.8.8.8
-      - 1.1.1.1
+      - 172.20.0.53   # Внутренний dnsmasq — без публичных DNS-утечек
+    depends_on:
+      dnsmasq:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "pgrep tun2socks"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - isolated_net
 
+  # ─────────────────────────────────────────────────────────────
+  # Android-эмулятор — ReDroid с уникальными HW-идентификаторами
+  # Сеть: через tun2socks (network_mode: service)
+  # Device profile: задаётся через env (RO_PRODUCT_MODEL и др.)
+  # HW identifiers: генерируются DockerAndroidController.start_container()
+  # ─────────────────────────────────────────────────────────────
   android_1:
-    image: redroid/redroid:11.0.0-latest
-    container_name: android_1
+    image: redroid/redroid:11.0.0-user
     privileged: true
     shm_size: '2gb'
     depends_on:
-      - tun2socks_1
+      tun2socks_1:
+        condition: service_healthy
     network_mode: "service:tun2socks_1"
     command:
+      # --- Display ---
       - androidboot.redroid_width=720
       - androidboot.redroid_height=1280
       - androidboot.redroid_fps=30
-    environment:
-      - ro.product.model=SM-G991U
-      - ro.product.manufacturer=samsung
-      - ro.product.brand=samsung
-      - ro.product.name=o1qsqw
-      - ro.product.device=o1q
-      - ro.product.board=lahaina
-      - ro.build.flavor=o1qsqw-user
-      - ro.build.type=user
-      - ro.build.tags=release-keys
-      - ro.build.fingerprint=samsung/o1qsqw/o1q:11/RP1A.200720.012/G991USQU4AUF5:user/release-keys
-      - ro.build.description=o1qsqw-user 11 RP1A.200720.012 G991USQU4AUF5 release-keys
-      
-      - ro.product.locale=en-US
-      - persist.sys.timezone=America/New_York
-      - TZ=America/New_York
-
+      - androidboot.redroid_ro=1
+      # --- Device Spoofing (задаётся через env из DEVICE_PROFILES) ---
+      - ro.product.model=${RO_PRODUCT_MODEL:-Pixel 5}
+      - ro.product.brand=${RO_PRODUCT_BRAND:-google}
+      - ro.product.name=${RO_PRODUCT_NAME:-redfin}
+      - ro.product.device=${RO_PRODUCT_DEVICE:-redfin}
+      - ro.product.manufacturer=${RO_PRODUCT_MANUFACTURER:-Google}
+      - ro.build.flavor=${RO_BUILD_FLAVOR:-redfin-user}
+      - ro.build.type=${RO_BUILD_TYPE:-user}
+      - ro.build.tags=${RO_BUILD_TAGS:-release-keys}
+      - ro.build.description=${RO_BUILD_DESCRIPTION:-redfin-user 11 RQ3A.211001.001 7641976 release-keys}
+      - ro.build.fingerprint=${RO_BUILD_FINGERPRINT:-google/redfin/redfin:11/RQ3A.211001.001/7641976:user/release-keys}
+      # --- Dynamic HW identifiers (генерируются DockerAndroidController) ---
+      - ro.serialno=${DEVICE_SERIAL}
+      - ro.build.id=${DEVICE_BUILD_ID}
+      # --- Hardware & Security ---
+      - ro.hardware.egl=adreno
+      - ro.hardware.vulkan=adreno
+      - ro.secure=1
+      - ro.debuggable=0
       - ro.kernel.qemu=0
-      
-      - redroid.prop.ro.secure=1
-      - redroid.prop.ro.debuggable=0
+      - ro.zygote=zygote64_32
+      # --- SIM (соответствует ГЕО прокси, задаётся через get_sim_env_for_country) ---
+      - gsm.sim.operator.numeric=${SIM_NUMERIC:-25001}
+      - gsm.sim.operator.alpha=${SIM_ALPHA:-MTS}
+      - gsm.sim.operator.iso-country=${SIM_ISO:-ru}
+    environment:
+      - TZ=${SYS_TIMEZONE:-Europe/Moscow}
+      - ro.product.locale=${SYS_LOCALE:-ru-RU}
+      - persist.sys.timezone=${SYS_TIMEZONE:-Europe/Moscow}
 
-      - ro.product.locale=${SYS_LOCALE:-en-US}
-      - persist.sys.timezone=${SYS_TIMEZONE:-America/New_York}
-      - TZ=${SYS_TIMEZONE:-America/New_York}
-
-      - gsm.sim.state=5 
-      - gsm.sim.operator.numeric=${SIM_NUMERIC:-310260} 
-      - gsm.sim.operator.alpha=${SIM_ALPHA:-T-Mobile} 
-      - gsm.sim.operator.iso-country=${SIM_ISO:-us} 
-      - gsm.operator.numeric=${SIM_NUMERIC:-310260}     
-      - gsm.operator.alpha=${SIM_ALPHA:-T-Mobile}       
-      - gsm.operator.iso-country=${SIM_ISO:-us}
+# ─────────────────────────────────────────────────────────────
+# Изолированная сеть с фиксированной подсетью
+# dnsmasq получает статический IP 172.20.0.53
+# ─────────────────────────────────────────────────────────────
+networks:
+  isolated_net:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/24
+          gateway: 172.20.0.1

@@ -3,10 +3,13 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import random
 import re
 import shutil
 import sqlite3
+import subprocess
+import tarfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -451,28 +454,97 @@ def _resolve_device_id(udid: Optional[str]) -> str:
 def transfer_dat_session(
     udid: Optional[str] = None,
     destination_dir: str | Path | None = None,
-    package_name: str = DeviceController.TELEGRAM_PACKAGE,
+    package_name: str = "org.telegram.messenger",
 ) -> Dict[str, str]:
     """
-    Export Telegram Android raw auth files (`tgnet.dat` + shared_prefs XML) via ADB root.
+    Export Telegram Android raw auth files (`tgnet.dat` + `userconfing.xml`)
+    via `docker exec` by archiving and copying them from the container.
+    This method does not require `adb root`.
     """
-    device_id = _resolve_device_id(udid)
-    adb_path = str(CONFIG.get("adb", {}).get("adb_path", "adb")).strip() or "adb"
-
+    container_name = _resolve_device_id(udid)
     target_dir = Path(destination_dir) if destination_dir is not None else PROJECT_ROOT / "sessions" / "dat"
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    controller = DeviceController(device_id=device_id, adb_path=adb_path)
-    controller.connect()
-    exported = controller.export_telegram_session_files(output_dir=target_dir, package_name=package_name)
+    archive_name = f"tg_session_{datetime.now().strftime('%Y%m%d%H%M%S')}.tar.gz"
+    archive_path_in_container = f"/data/local/tmp/{archive_name}"
+    local_archive_path = target_dir / archive_name
+    
+    # Определяем наиболее вероятный путь к данным приложения
+    app_data_folder = "org.telegram.messenger"
+    if package_name and package_name != "org.telegram.messenger":
+        app_data_folder = package_name
 
+    logger.info(f"[{container_name}] Archiving Telegram data via docker exec...")
+    exec_command = [
+        "docker", "exec",
+        "-u", "0",  # Run as root inside the container
+        container_name,
+        "tar", "-czf", archive_path_in_container,
+        "-C", "/data/data",
+        app_data_folder
+    ]
+    try:
+        subprocess.run(exec_command, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to archive session in container {container_name}: {e.stderr.decode()}")
+        raise RuntimeError(f"Could not archive session files in {container_name}.") from e
+
+    logger.info(f"[{container_name}] Copying archive from container to host...")
+    cp_command = [
+        "docker", "cp",
+        f"{container_name}:{archive_path_in_container}",
+        str(local_archive_path)
+    ]
+    try:
+        subprocess.run(cp_command, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to copy archive from container {container_name}: {e.stderr.decode()}")
+        raise RuntimeError(f"Could not copy archive from {container_name}.") from e
+    finally:
+        # Всегда пытаемся удалить временный архив из контейнера
+        logger.info(f"[{container_name}] Cleaning up archive in container...")
+        cleanup_command = ["docker", "exec", "-u", "0", container_name, "rm", archive_path_in_container]
+        subprocess.run(cleanup_command, check=False, capture_output=True)
+
+    logger.info(f"[{container_name}] Extracting archive on host at {target_dir}...")
+    
+    unpacked_dir = target_dir / container_name
+    unpacked_dir.mkdir(exist_ok=True)
+    
+    with tarfile.open(local_archive_path, "r:gz") as tar:
+        tar.extractall(path=unpacked_dir)
+    
+    # Удаляем локальный архив после распаковки
+    os.remove(local_archive_path)
+
+    # Собираем пути к извлеченным файлам
     result: Dict[str, str] = {}
-    for name, source_path in exported.items():
-        final_path = target_dir / name
-        shutil.copy2(source_path, final_path)
-        result[name] = str(final_path)
+    
+    # Ищем файлы в /data/data/org.telegram.messenger/files и shared_prefs
+    source_base_path = unpacked_dir / app_data_folder
+    files_dir = source_base_path / "files"
+    prefs_dir = source_base_path / "shared_prefs"
 
-    logger.info("Transferred Telegram session files from %s to %s", device_id, target_dir)
+    if files_dir.exists():
+        for f in files_dir.iterdir():
+            if f.is_file():
+                final_path = target_dir / f.name
+                shutil.copy2(f, final_path)
+                result[f.name] = str(final_path)
+
+    if prefs_dir.exists():
+        for f in prefs_dir.iterdir():
+            if f.is_file() and f.name.endswith('.xml'):
+                final_path = target_dir / f.name
+                shutil.copy2(f, final_path)
+                result[f.name] = str(final_path)
+
+    shutil.rmtree(unpacked_dir) # Удаляем временную папку с распакованными файлами
+
+    if not result or not any(k in result for k in ["tgnet.dat", "userconfig.xml", "userconfing.xml"]):
+        raise RuntimeError(f"Extraction failed: essential files (tgnet.dat, userconfig.xml) not found in {target_dir}")
+
+    logger.info("Transferred and extracted Telegram session files from %s to %s", container_name, target_dir)
     return result
 
 

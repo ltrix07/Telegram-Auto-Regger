@@ -481,7 +481,7 @@ class SmsApi(SMSActivateAPI):
         country: str,
         max_price: Optional[float] = None,
         country_id: Optional[int] = None,
-        operator: Optional[str] = None,  # Добавили новый параметр
+        operator: Optional[str] = None,
     ) -> Dict[str, Any]:
         if country_id is None:
             resolved_country_id = self._get_country_id(country)
@@ -492,8 +492,7 @@ class SmsApi(SMSActivateAPI):
                 raise ValueError(f"Invalid country_id value: {country_id!r}") from exc
 
         kwargs: Dict[str, Any] = {"service": service, "country": int(resolved_country_id)}
-        
-        # Добавляем оператора в параметры запроса, если он указан
+
         if operator:
             kwargs["operator"] = operator
 

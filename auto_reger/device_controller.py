@@ -4,6 +4,7 @@ import logging
 import os
 import random
 import re
+import secrets
 import shlex
 import signal
 import subprocess
@@ -562,6 +563,52 @@ class DeviceController:
         ok_xbin = self._safe_mv("/system/xbin/su_hidden", "/system/xbin/su")
         return ok_bin or ok_xbin
 
+    def _setup_device_state(self) -> None:
+        """Configure runtime device state (battery, android_id) exactly once after boot.
+
+        Reads current system values first so we never overwrite state that was
+        already configured, avoiding suspicious metric jumps visible to anti-fraud.
+        """
+        # ── Battery ──────────────────────────────────────────────────────────────
+        # ReDroid boots with AC power connected and level=100.  We only apply
+        # randomization when the device is still in that default plugged-in state.
+        try:
+            battery_dump = self._adb("shell", "dumpsys", "battery", check=False, timeout=10).stdout
+            already_customized = (
+                "AC powered: false" in battery_dump
+                or ("level:" in battery_dump and "level: 100" not in battery_dump)
+            )
+            if not already_customized:
+                battery_level = random.randint(45, 85)
+                self._adb("shell", "dumpsys", "battery", "set", "ac", "0", check=False)
+                self._adb("shell", "dumpsys", "battery", "set", "status", "3", check=False)
+                self._adb("shell", "dumpsys", "battery", "set", "level", str(battery_level), check=False)
+                LOGGER.info("Battery state randomized on %s: level=%s", self.device_id, battery_level)
+            else:
+                LOGGER.debug("Battery already customized on %s, skipping", self.device_id)
+        except Exception:
+            LOGGER.warning("Battery setup failed on %s (non-fatal)", self.device_id, exc_info=True)
+
+        # ── android_id ───────────────────────────────────────────────────────────
+        # Set only when the device still carries the default empty/null value so
+        # we don't regenerate an ID that was already written this session.
+        try:
+            current_id = self._adb(
+                "shell", "settings", "get", "secure", "android_id",
+                check=False, timeout=10,
+            ).stdout.strip()
+            if not current_id or current_id in ("null", ""):
+                new_android_id = secrets.token_hex(8)  # 16 hex chars — standard Android format
+                self._adb(
+                    "shell", "settings", "put", "secure", "android_id", new_android_id,
+                    check=False,
+                )
+                LOGGER.info("android_id set on %s: %s", self.device_id, new_android_id)
+            else:
+                LOGGER.debug("android_id already set on %s (%s), skipping", self.device_id, current_id)
+        except Exception:
+            LOGGER.warning("android_id setup failed on %s (non-fatal)", self.device_id, exc_info=True)
+
     def connect(self) -> None:
         """
         Connect to network ADB device if ``device_id`` is in ``host:port`` format.
@@ -585,12 +632,7 @@ class DeviceController:
             else:
                 raise RuntimeError(f"ADB device {self.device_id} failed to reach stable `device` state")
         self._ensure_root_access()
-        # Рандомизация состояния батареи
-        battery_level = random.randint(45, 85)
-        # Отключаем от розетки (ac=0), статус 3 (Discharging)
-        self._adb("shell", "dumpsys", "battery", "set", "ac", "0", check=False)
-        self._adb("shell", "dumpsys", "battery", "set", "status", "3", check=False)
-        self._adb("shell", "dumpsys", "battery", "set", "level", str(battery_level), check=False)
+        self._setup_device_state()
         self.u2_client = u2.connect(self.device_id)
 
     def is_ready(self) -> bool:

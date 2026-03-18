@@ -730,7 +730,7 @@ def rent_number_with_retry(sms_api: SmsApi) -> Tuple[str, str, str]:
                 country=country,
                 max_price=max_price,
                 country_id=country_id,
-                operator=ALLOWED_OPERATORS # Передаем наш White List
+                # operator=ALLOWED_OPERATORS
             )
             
             # Проверяем на ошибки баланса или отсутствия номеров
@@ -858,8 +858,22 @@ def resolve_workers(args: argparse.Namespace, devices_count: int) -> int:
     return workers
 
 
+def _profile_to_env(profile: dict) -> dict[str, str]:
+    """Convert DEVICE_PROFILES dot-notation keys to uppercase env var names.
+
+    Example: ``ro.product.model`` → ``RO_PRODUCT_MODEL``
+
+    These names match the ``${RO_PRODUCT_MODEL}`` placeholders in docker-compose.yml.
+    """
+    return {
+        key.upper().replace(".", "_").replace("-", "_"): value
+        for key, value in profile.items()
+    }
+
+
 def build_docker_controller_from_config(
     country_code: Optional[str] = None,
+    worker_index: Optional[int] = None,
 ) -> tuple[DockerAndroidController, int]:
     docker_cfg = CONFIG.get("docker", {})
     if not isinstance(docker_cfg, dict):
@@ -882,6 +896,7 @@ def build_docker_controller_from_config(
     controller = DockerAndroidController(
         compose_file=compose_file,
         compose_project=project_name,
+        worker_index=worker_index,
         country_code=country_code,
     )
 
@@ -925,7 +940,8 @@ def run_single_cycle(
         _check_shutdown(stop_event)
 
         docker_controller, boot_timeout = build_docker_controller_from_config(
-            country_code=sim_country_code
+            country_code=sim_country_code,
+            worker_index=cycle_index,
         )
         LOGGER.info(
             "Cycle %s/%s pre-flight cleanup: stopping old Docker Android container",
@@ -974,7 +990,8 @@ def run_single_cycle(
         LOGGER.info("Selected device profile: %s", device_profile.get("ro.product.model"))
         extra_env = {"PROXY_URL": tun2socks_url}
         extra_env.update(operator_env)
-        extra_env.update(device_profile)
+        # Map dot-notation keys (ro.product.model) → docker-compose env vars (RO_PRODUCT_MODEL)
+        extra_env.update(_profile_to_env(device_profile))
 
         LOGGER.info(
             "Cycle %s/%s starting fresh Docker Android container with proxy and operator spoofing",
@@ -1236,7 +1253,8 @@ def run_single_cycle_with_video(
         _check_shutdown(stop_event)
 
         docker_controller, boot_timeout = build_docker_controller_from_config(
-            country_code=sim_country_code
+            country_code=sim_country_code,
+            worker_index=cycle_index,
         )
         docker_controller.stop_container()
         _check_shutdown(stop_event)
@@ -1278,7 +1296,8 @@ def run_single_cycle_with_video(
         LOGGER.info("Selected device profile: %s", device_profile.get("ro.product.model"))
         extra_env = {"PROXY_URL": tun2socks_url}
         extra_env.update(operator_env)
-        extra_env.update(device_profile)
+        # Map dot-notation keys (ro.product.model) → docker-compose env vars (RO_PRODUCT_MODEL)
+        extra_env.update(_profile_to_env(device_profile))
 
         docker_controller.start_container(extra_env=extra_env)
         docker_controller.wait_for_boot(device_udid=device_id, timeout=boot_timeout)

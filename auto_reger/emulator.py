@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import shlex
 import subprocess
 import time
@@ -24,6 +25,7 @@ class DockerAndroidController:
         workdir: Optional[str] = None,
         compose_file: Optional[str] = None,
         compose_project: Optional[str] = None,
+        worker_index: Optional[int] = None,
         poll_interval_seconds: float = 1.5,
         country_code: Optional[str] = None,
     ) -> None:
@@ -39,11 +41,14 @@ class DockerAndroidController:
 
         compose_file_raw = compose_file or str(docker_cfg.get("compose_file", "docker-compose.yml")).strip()
         self.compose_file = str(resolve_project_path(compose_file_raw)) if compose_file_raw else ""
-        self.compose_project = (
+
+        base_project = (
             compose_project
             or str(docker_cfg.get("project_name", "auto_reger")).strip()
             or "auto_reger"
         )
+        # Уникальный суффикс воркера изолирует сеть и контейнеры каждого потока
+        self.compose_project = f"{base_project}_{worker_index}" if worker_index is not None else base_project
 
         workdir_raw = workdir or str(docker_cfg.get("workdir", "")).strip()
         if workdir_raw:
@@ -93,18 +98,49 @@ class DockerAndroidController:
         LOGGER.info("Docker action `%s` completed successfully", action)
         return result
 
+    @staticmethod
+    def _generate_device_serial() -> str:
+        """Generates a unique 14-character hex device serial (e.g. 'a3f1c9e72b4d8f')."""
+        return secrets.token_hex(7)  # 7 bytes → 14 hex chars
+
+    @staticmethod
+    def _generate_build_id() -> str:
+        """Generates a build ID in Android format: letter + digits (e.g. 'RQ3A.210705.001')."""
+        prefix = secrets.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        mid = secrets.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        digits = secrets.randbelow(900000) + 100000  # 6-digit number
+        patch = secrets.randbelow(900) + 100         # 3-digit patch
+        return f"{prefix}{mid}{secrets.randbelow(9) + 1}A.{digits}.{patch:03d}"
+
     def start_container(self, extra_env: Optional[dict[str, str]] = None) -> None:
-        """Starts Android container stack using docker-compose up -d."""
-        env = {}
+        """Starts Android container stack using docker-compose up -d.
+
+        Automatically generates unique DEVICE_SERIAL and DEVICE_BUILD_ID so each
+        container instance gets distinct hardware identifiers without relying on
+        external bash scripts.
+        """
+        env: dict[str, str] = {}
+
         if self.country_code:
             from .sim_spoofing import get_sim_env_for_country
             LOGGER.info("Applying SIM spoofing for country: %s", self.country_code)
             env.update(get_sim_env_for_country(self.country_code))
-            
+
+        # Generate unique HW identifiers — overrides any defaults in docker-compose.yml
+        device_serial = self._generate_device_serial()
+        device_build_id = self._generate_build_id()
+        env["DEVICE_SERIAL"] = device_serial
+        env["DEVICE_BUILD_ID"] = device_build_id
+        LOGGER.info(
+            "Generated device identifiers: DEVICE_SERIAL=%s DEVICE_BUILD_ID=%s",
+            device_serial,
+            device_build_id,
+        )
+
         if extra_env:
             env.update(extra_env)
 
-        self._run_compose(["up", "-d"], action="start_container", env=env if env else None)
+        self._run_compose(["up", "-d"], action="start_container", env=env)
 
     def stop_container(self) -> None:
         """Stops and destroys Android container stack, including volumes."""
