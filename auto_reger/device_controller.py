@@ -1063,7 +1063,9 @@ class DeviceController:
         self._ensure_frida_server()
 
         js_code = """
-            Java.performNow(function () {
+        setTimeout(function() {
+            Java.perform(function () {
+
                 // ── 1. SafetyNet ────────────────────────────────────────────────────────
                 try {
                     var JSONObject = Java.use('org.json.JSONObject');
@@ -1128,49 +1130,19 @@ class DeviceController:
 
                 send('[FRIDA] All hooks loaded');
             });
-            """
-
-
+        }, 1000); // Даем 1 секунду на загрузку Java VM перед инъекцией
+        """
+        
         try:
             LOGGER.info("Starting Telegram via Frida on %s...", self.device_id)
 
-            # Резолвим реальную launcher activity
-            resolve_output = self._adb(
-                "shell", "cmd", "package", "resolve-activity", "--brief", self.telegram_package,
-                check=False
-            ).stdout.strip()
-            main_activity = resolve_output.split('\n')[-1].strip()
-            LOGGER.info("Resolved Telegram activity: %s", main_activity)
-
-            if not main_activity or '/' not in main_activity:
-                raise RuntimeError(f"Could not resolve launcher activity for {self.telegram_package}: {resolve_output!r}")
-
-            # Запускаем через ADB с правильной activity
-            self._adb(
-                "shell", "am", "start", "-W",
-                "-a", "android.intent.action.MAIN",
-                "-c", "android.intent.category.LAUNCHER",
-                "-n", main_activity,
-                check=False,
-            )
-            time.sleep(3.0)
-
-            # Получаем PID
-            pid_raw = self._adb("shell", "pidof", self.telegram_package, check=False).stdout.strip()
-            if not pid_raw:
-                raise RuntimeError(f"Could not find PID for {self.telegram_package} after ADB start")
-            pid = int(pid_raw.split()[0])
-            LOGGER.info("Telegram PID: %d", pid)
-
-            # Подключаемся к frida-server по TCP
             frida_host = f"{self.device_id.split(':')[0]}:27042"
             device = frida.get_device_manager().add_remote_device(frida_host)
 
-            # Убиваем Telegram если уже запущен, чтобы spawn сработал чисто
+            # force-stop на случай если процесс уже жив
             self._adb("shell", "am", "force-stop", self.telegram_package, check=False)
             time.sleep(0.5)
 
-            # spawn — хуки устанавливаются ДО того как Telegram выполнит любой код
             pid = device.spawn([self.telegram_package])
             self._frida_session = device.attach(pid)
             script = self._frida_session.create_script(js_code)
@@ -1182,8 +1154,8 @@ class DeviceController:
                     LOGGER.error("[FRIDA ERROR] %s", message.get('stack', message))
 
             script.on('message', on_message)
-            script.load()          # хуки установлены — только теперь разрешаем запуск
-            device.resume(pid)     # Telegram начинает выполняться с уже активными хуками
+            script.load()
+            device.resume(pid)
             LOGGER.info("Frida injection successful (spawn+hook). PID=%d", pid)
 
         except Exception as e:
