@@ -1065,20 +1065,27 @@ class DeviceController:
         try:
             LOGGER.info("Starting Telegram via Frida on %s...", self.device_id)
 
-            # Для TCP-эмуляторов (127.0.0.1:5555) используем remote device,
-            # который коннектится напрямую к frida-server по TCP.
-            # frida-server по умолчанию слушает на порту 27042.
-            if ":" in self.device_id:
-                host = self.device_id.split(":")[0]  # "127.0.0.1"
-                frida_host = f"{host}:27042"
-                device = frida.get_device_manager().add_remote_device(frida_host)
-            else:
-                # USB или локальный эмулятор — оставляем как было
-                device = frida.get_device(self.device_id, timeout=10)
+            # Сначала запускаем Telegram через ADB (spawn на эмуляторах ненадёжен)
+            self._adb(
+                "shell", "am", "start", "-W",
+                "-a", "android.intent.action.MAIN",
+                "-c", "android.intent.category.LAUNCHER",
+                "-n", f"{self.telegram_package}/{self.telegram_package}.AndroidManifest",
+                check=False,
+            )
+            # Даём процессу время подняться
+            time.sleep(3.0)
 
-            pid = device.spawn([self.telegram_package])
+            # Получаем PID через ADB
+            pid_raw = self._adb("shell", "pidof", self.telegram_package, check=False).stdout.strip()
+            if not pid_raw:
+                raise RuntimeError(f"Could not find PID for {self.telegram_package} after ADB start")
+            pid = int(pid_raw.split()[0])
+            LOGGER.info("Telegram PID via ADB: %d", pid)
 
-            # Сохраняем сессию в атрибут класса, чтобы сборщик мусора её не убил
+            # Подключаемся к frida-server по TCP и аттачимся к уже запущенному процессу
+            frida_host = f"{self.device_id.split(':')[0]}:27042"
+            device = frida.get_device_manager().add_remote_device(frida_host)
             self._frida_session = device.attach(pid)
             script = self._frida_session.create_script(js_code)
 
@@ -1088,7 +1095,6 @@ class DeviceController:
 
             script.on('message', on_message)
             script.load()
-            device.resume(pid)
             LOGGER.info("Frida injection successful. Waiting for UI...")
 
         except Exception as e:
