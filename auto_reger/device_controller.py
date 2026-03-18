@@ -985,6 +985,7 @@ class DeviceController:
         # Запускаем через Popen, чтобы не блокировать выполнение питон-скрипта
         cmd = [self.adb_path, "-s", self.device_id, "shell", "/data/local/tmp/frida-server"]
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self._adb("forward", "tcp:27042", "tcp:27042", check=False)
         
         # Даем серверу 3 секунды на инициализацию портов
         time.sleep(3.0)
@@ -1045,8 +1046,18 @@ class DeviceController:
 
         try:
             LOGGER.info("Starting Telegram via Frida on %s...", self.device_id)
-            # ВАЖНО: Используем get_device(self.device_id) для работы с TCP/Docker эмуляторами!
-            device = frida.get_device(self.device_id, timeout=10)
+
+            # Для TCP-эмуляторов (127.0.0.1:5555) используем remote device,
+            # который коннектится напрямую к frida-server по TCP.
+            # frida-server по умолчанию слушает на порту 27042.
+            if ":" in self.device_id:
+                host = self.device_id.split(":")[0]  # "127.0.0.1"
+                frida_host = f"{host}:27042"
+                device = frida.get_device_manager().add_remote_device(frida_host)
+            else:
+                # USB или локальный эмулятор — оставляем как было
+                device = frida.get_device(self.device_id, timeout=10)
+
             pid = device.spawn([self.telegram_package])
 
             # Сохраняем сессию в атрибут класса, чтобы сборщик мусора её не убил
