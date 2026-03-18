@@ -48,8 +48,10 @@ class DockerAndroidController:
             or str(docker_cfg.get("project_name", "auto_reger")).strip()
             or "auto_reger"
         )
-        # Уникальный суффикс воркера изолирует сеть и контейнеры каждого потока
-        self.compose_project = f"{base_project}_{worker_index}" if worker_index is not None else base_project
+        # worker_index is a stable ID for the lifetime of one worker thread.
+        # It never changes between cycles, so stop→start always targets the same project.
+        self._worker_index: int = int(worker_index) if worker_index is not None else 0
+        self.compose_project = f"{base_project}_{self._worker_index}" if worker_index is not None else base_project
 
         workdir_raw = workdir or str(docker_cfg.get("workdir", "")).strip()
         if workdir_raw:
@@ -175,6 +177,12 @@ class DockerAndroidController:
             device_build_id,
         )
 
+        # Each worker gets a unique host-side ADB port so parallel workers don't clash.
+        # Worker 0 → 5555, worker 1 → 5565, worker 2 → 5575, …
+        adb_port = 5555 + self._worker_index * 10
+        env["ADB_PORT"] = str(adb_port)
+        LOGGER.info("Worker %s: ADB host port set to %s", self._worker_index, adb_port)
+
         if extra_env:
             env.update(extra_env)
 
@@ -182,7 +190,7 @@ class DockerAndroidController:
 
     def stop_container(self) -> None:
         """Stops and destroys Android container stack, including volumes."""
-        self._run_compose(["down", "-v"], action="stop_container")
+        self._run_compose(["down", "-v", "--remove-orphans"], action="stop_container")
 
     def wait_for_boot(self, device_udid: str, timeout: int = 90) -> None:
         """Waits until adb reports Android boot completion flag as 1."""

@@ -12,7 +12,7 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     ports:
-      - "5555:5555"
+      - "${ADB_PORT:-5555}:5555"
     dns:
       - 8.8.8.8
       - 1.1.1.1

@@ -805,6 +805,20 @@ def resolve_workers(args: argparse.Namespace, devices_count: int) -> int:
     return workers
 
 
+def _stable_worker_id() -> int:
+    """Derive a zero-based integer worker ID from the current thread name.
+
+    ThreadPoolExecutor names threads ``<prefix>_N``.  We extract N so the same
+    thread always gets the same ID regardless of which cycle it is running.
+    Falls back to 0 for the main thread or any unrecognised naming scheme.
+    """
+    name = threading.current_thread().name
+    parts = name.rsplit("_", 1)
+    if len(parts) == 2 and parts[1].isdigit():
+        return int(parts[1])
+    return 0
+
+
 def _profile_to_env(profile: dict) -> dict[str, str]:
     """Convert DEVICE_PROFILES dot-notation keys to uppercase env var names.
 
@@ -888,7 +902,7 @@ def run_single_cycle(
 
         docker_controller, boot_timeout = build_docker_controller_from_config(
             country_code=sim_country_code,
-            worker_index=cycle_index,
+            worker_index=_stable_worker_id(),
         )
         LOGGER.info(
             "Cycle %s/%s pre-flight cleanup: stopping old Docker Android container",
@@ -1201,7 +1215,7 @@ def run_single_cycle_with_video(
 
         docker_controller, boot_timeout = build_docker_controller_from_config(
             country_code=sim_country_code,
-            worker_index=cycle_index,
+            worker_index=_stable_worker_id(),
         )
         docker_controller.stop_container()
         _check_shutdown(stop_event)
