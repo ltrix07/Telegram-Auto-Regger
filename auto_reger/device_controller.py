@@ -1033,7 +1033,7 @@ class DeviceController:
         for prop, val in suspicious_props.items():
             result = self._adb("shell", f"setprop {prop} {val}", check=False)
             LOGGER.info("setprop %s=%s rc=%d", prop, val, result.returncode)
-            
+
         LOGGER.info("Launching Telegram on %s", self.device_id)
         self.invalidate_ui_dump_cache()
         time.sleep(3.0)
@@ -1203,16 +1203,26 @@ class DeviceController:
             # Подключаемся к frida-server по TCP
             frida_host = f"{self.device_id.split(':')[0]}:27042"
             device = frida.get_device_manager().add_remote_device(frida_host)
+
+            # Убиваем Telegram если уже запущен, чтобы spawn сработал чисто
+            self._adb("shell", "am", "force-stop", self.telegram_package, check=False)
+            time.sleep(0.5)
+
+            # spawn — хуки устанавливаются ДО того как Telegram выполнит любой код
+            pid = device.spawn([self.telegram_package])
             self._frida_session = device.attach(pid)
             script = self._frida_session.create_script(js_code)
 
             def on_message(message, data):
                 if message['type'] == 'send':
-                    LOGGER.info(f"[FRIDA] {message['payload']}")
+                    LOGGER.info("[FRIDA] %s", message['payload'])
+                elif message['type'] == 'error':
+                    LOGGER.error("[FRIDA ERROR] %s", message.get('stack', message))
 
             script.on('message', on_message)
-            script.load()
-            LOGGER.info("Frida injection successful. Waiting for UI...")
+            script.load()          # хуки установлены — только теперь разрешаем запуск
+            device.resume(pid)     # Telegram начинает выполняться с уже активными хуками
+            LOGGER.info("Frida injection successful (spawn+hook). PID=%d", pid)
 
         except Exception as e:
             LOGGER.exception("Frida injection failed. Falling back to ADB start...")
