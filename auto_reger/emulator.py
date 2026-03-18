@@ -125,6 +125,8 @@ class DockerAndroidController:
         # Ensure ./adb_keys directory exists so Docker bind mount never fails.
         # Path is hardcoded in docker-compose.yml as ./adb_keys — no env var needed.
         dest = self.workdir / "adb_keys"
+        if dest.exists() and dest.is_file():
+            os.remove(dest)
         dest.mkdir(parents=True, exist_ok=True)
 
         system_key = Path.home() / ".android" / "adbkey.pub"
