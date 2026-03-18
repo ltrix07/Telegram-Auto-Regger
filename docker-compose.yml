@@ -57,10 +57,13 @@ services:
       # --- Dynamic HW identifiers (генерируются DockerAndroidController) ---
       - ro.serialno=${DEVICE_SERIAL:-SERIAL}
       - ro.build.id=${DEVICE_BUILD_ID:-BUILD}
-      # --- SIM (соответствует ГЕО прокси, задаётся через get_sim_env_for_country) ---
+      # --- SIM (соответствует ГЕО прокси, задаётся через get_sim_props_by_operator) ---
       - gsm.sim.operator.numeric=${SIM_NUMERIC:-25001}
       - gsm.sim.operator.alpha=${SIM_ALPHA:-MTS}
       - gsm.sim.operator.iso-country=${SIM_ISO:-ru}
+      - gsm.operator.numeric=${SIM_NUMERIC:-25001}
+      - gsm.operator.alpha=${SIM_ALPHA:-MTS}
+      - gsm.operator.iso-country=${SIM_ISO:-ru}
     # --- ADB Key Passthrough (ro.secure=1 требует pre-authorized ключ) ---
     volumes:
       - ./adb_keys/adbkey.pub:/data/misc/adb/adb_keys:ro

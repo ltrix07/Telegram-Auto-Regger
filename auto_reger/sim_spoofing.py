@@ -63,28 +63,68 @@ def get_sim_env_for_country(country_code: str) -> Dict[str, str]:
     }
 
 
-def get_operator_env(country_code: str, operator_name: str) -> dict[str, str]:
-    country = country_code.upper()
-    op = operator_name.lower().strip()
+# Operator registry: maps normalised operator name → (numeric, alpha, iso)
+# numeric = MCC+MNC as a 6-char string
+_OPERATOR_MAP: Dict[str, Dict[str, str]] = {
+    # USA virtual / MVNO operators
+    "textnow":   {"numeric": "310260", "alpha": "TextNow",  "iso": "us"},
+    "tmobile":   {"numeric": "310260", "alpha": "T-Mobile", "iso": "us"},
+    "t-mobile":  {"numeric": "310260", "alpha": "T-Mobile", "iso": "us"},
+    "verizon":   {"numeric": "311480", "alpha": "Verizon",  "iso": "us"},
+    "att":       {"numeric": "310410", "alpha": "AT&T",     "iso": "us"},
+    "at&t":      {"numeric": "310410", "alpha": "AT&T",     "iso": "us"},
+    "sprint":    {"numeric": "310120", "alpha": "Sprint",   "iso": "us"},
+    "lycamobile": {"numeric": "310260", "alpha": "Lycamobile", "iso": "us"},
+    # UK
+    "vodafone":  {"numeric": "23415",  "alpha": "Vodafone", "iso": "gb"},
+    "o2":        {"numeric": "23410",  "alpha": "O2",       "iso": "gb"},
+    "ee":        {"numeric": "23430",  "alpha": "EE",       "iso": "gb"},
+    # Indonesia
+    "telkomsel": {"numeric": "51010",  "alpha": "Telkomsel","iso": "id"},
+}
 
-    # Дефолтные значения (fallback)
-    env = {
-        "gsm.sim.state": "5",
-        "gsm.sim.operator.numeric": "310260",
-        "gsm.sim.operator.alpha": "T-Mobile",
-        "gsm.sim.operator.iso-country": "us",
-        "gsm.operator.numeric": "310260",
-        "gsm.operator.alpha": "T-Mobile",
-        "gsm.operator.iso-country": "us",
+# Country-level defaults (fallback when operator is unknown)
+_COUNTRY_DEFAULTS: Dict[str, Dict[str, str]] = {
+    "US":  {"numeric": "310260", "alpha": "T-Mobile", "iso": "us"},
+    "GB":  {"numeric": "23415",  "alpha": "Vodafone", "iso": "gb"},
+    "ID":  {"numeric": "51010",  "alpha": "Telkomsel","iso": "id"},
+    "PL":  {"numeric": "26001",  "alpha": "Plus",     "iso": "pl"},
+}
+
+
+def get_sim_props_by_operator(operator_name: str, country_code: str) -> Dict[str, str]:
+    """Return Docker env vars (SIM_NUMERIC, SIM_ALPHA, SIM_ISO) derived from the
+    operator name exactly as returned by the SMS API.
+
+    Priority: exact operator match → country default → hardcoded US T-Mobile.
+
+    Args:
+        operator_name: Operator string from SMS API (e.g. 'textnow', 'verizon').
+        country_code:  Two-letter ISO country code (e.g. 'US', 'GB').
+
+    Returns:
+        Dict with keys SIM_NUMERIC, SIM_ALPHA, SIM_ISO.
+    """
+    op = operator_name.lower().strip()
+    country = country_code.upper().strip()
+
+    props = (
+        _OPERATOR_MAP.get(op)
+        or _COUNTRY_DEFAULTS.get(country)
+        or {"numeric": "310260", "alpha": "T-Mobile", "iso": "us"}
+    )
+
+    return {
+        "SIM_NUMERIC": props["numeric"],
+        "SIM_ALPHA":   props["alpha"],
+        "SIM_ISO":     props["iso"],
     }
 
-    if country in ("US", "USA"):
-        if "tmobile" in op or "t-mobile" in op:
-            env.update({"gsm.sim.operator.numeric": "310260", "gsm.sim.operator.alpha": "T-Mobile", "gsm.operator.numeric": "310260", "gsm.operator.alpha": "T-Mobile"})
-        elif "att" in op or "at&t" in op:
-            env.update({"gsm.sim.operator.numeric": "310410", "gsm.sim.operator.alpha": "AT&T", "gsm.operator.numeric": "310410", "gsm.operator.alpha": "AT&T"})
-        elif "verizon" in op:
-            env.update({"gsm.sim.operator.numeric": "311480", "gsm.sim.operator.alpha": "Verizon", "gsm.operator.numeric": "311480", "gsm.operator.alpha": "Verizon"})
 
-    # Добавь поддержку других стран по мере необходимости (ID, GB и т.д.)
-    return env
+def get_operator_env(country_code: str, operator_name: str) -> dict[str, str]:
+    """Legacy helper — kept for backwards compatibility.
+
+    Prefer get_sim_props_by_operator() for new call-sites: it returns
+    Docker-style SIM_* keys that align with docker-compose.yml variables.
+    """
+    return get_sim_props_by_operator(operator_name, country_code)

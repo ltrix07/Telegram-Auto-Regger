@@ -24,7 +24,7 @@ from auto_reger.proxy_api import ProxyApi
 from auto_reger.session_generator import SessionGenerator
 from auto_reger.registration import TelegramRegistrator
 from auto_reger.registration_with_video import TelegramRegistratorWithVideo
-from auto_reger.sim_spoofing import get_operator_env
+from auto_reger.sim_spoofing import get_sim_props_by_operator
 from auto_reger.sms_api import (
     SmsApi,
     can_set_status_8,
@@ -914,7 +914,7 @@ def run_single_cycle(
             device_id,
         )
 
-        operator_env = get_operator_env(country, operator_name)
+        operator_env = get_sim_props_by_operator(operator_name, country)
         LOGGER.info("Generated operator env for %s: %s", operator_name, operator_env)
 
         proxy_host = str(proxy_data.get("ip", "")).strip()
@@ -1218,7 +1218,7 @@ def run_single_cycle_with_video(
             device_id,
         )
 
-        operator_env = get_operator_env(country, operator_name)
+        operator_env = get_sim_props_by_operator(operator_name, country)
         LOGGER.info("Generated operator env for %s: %s", operator_name, operator_env)
 
         proxy_data = proxy_api.get_proxy(country_code=country)
