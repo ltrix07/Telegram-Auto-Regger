@@ -977,14 +977,22 @@ class DeviceController:
         LOGGER.info("Pushing frida-server to emulator...")
         self._adb("push", local_path, "/data/local/tmp/frida-server")
         self._adb("shell", "chmod", "755", "/data/local/tmp/frida-server")
+
+        selinux_result = self._adb("shell", "setenforce", "0", check=False)
+        LOGGER.info("SELinux set to permissive: rc=%d", selinux_result.returncode)
+
+        # Проверяем результат
+        getenforce = self._adb("shell", "getenforce", check=False).stdout.strip()
+        LOGGER.info("SELinux status: %s", getenforce)
         
         # 5. Убиваем старые зависшие процессы (на всякий случай) и запускаем новый в фоне
         self._adb("shell", "killall", "-9", "frida-server", check=False)
         LOGGER.info("Starting frida-server in background...")
         
         # Запускаем через Popen, чтобы не блокировать выполнение питон-скрипта
-        cmd = [self.adb_path, "-s", self.device_id, "shell", "/data/local/tmp/frida-server &"]
+        cmd = [self.adb_path, "-s", self.device_id, "shell", "/data/local/tmp/frida-server"]
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(3.0)
         
         # Даем серверу 3 секунды на инициализацию портов
         time.sleep(3.0)
