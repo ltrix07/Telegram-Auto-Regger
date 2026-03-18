@@ -1065,25 +1065,35 @@ class DeviceController:
         try:
             LOGGER.info("Starting Telegram via Frida on %s...", self.device_id)
 
-            # Сначала запускаем Telegram через ADB (spawn на эмуляторах ненадёжен)
+            # Резолвим реальную launcher activity
+            resolve_output = self._adb(
+                "shell", "cmd", "package", "resolve-activity", "--brief", self.telegram_package,
+                check=False
+            ).stdout.strip()
+            main_activity = resolve_output.split('\n')[-1].strip()
+            LOGGER.info("Resolved Telegram activity: %s", main_activity)
+
+            if not main_activity or '/' not in main_activity:
+                raise RuntimeError(f"Could not resolve launcher activity for {self.telegram_package}: {resolve_output!r}")
+
+            # Запускаем через ADB с правильной activity
             self._adb(
                 "shell", "am", "start", "-W",
                 "-a", "android.intent.action.MAIN",
                 "-c", "android.intent.category.LAUNCHER",
-                "-n", f"{self.telegram_package}/{self.telegram_package}.AndroidManifest",
+                "-n", main_activity,
                 check=False,
             )
-            # Даём процессу время подняться
             time.sleep(3.0)
 
-            # Получаем PID через ADB
+            # Получаем PID
             pid_raw = self._adb("shell", "pidof", self.telegram_package, check=False).stdout.strip()
             if not pid_raw:
                 raise RuntimeError(f"Could not find PID for {self.telegram_package} after ADB start")
             pid = int(pid_raw.split()[0])
-            LOGGER.info("Telegram PID via ADB: %d", pid)
+            LOGGER.info("Telegram PID: %d", pid)
 
-            # Подключаемся к frida-server по TCP и аттачимся к уже запущенному процессу
+            # Подключаемся к frida-server по TCP
             frida_host = f"{self.device_id.split(':')[0]}:27042"
             device = frida.get_device_manager().add_remote_device(frida_host)
             self._frida_session = device.attach(pid)
