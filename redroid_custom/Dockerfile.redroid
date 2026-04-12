@@ -1,6 +1,5 @@
-# Используем базовый образ ReDroid, в который УЖЕ интегрирован Magisk
-# Если хочешь собирать Magisk сам, посмотри репозиторий: https://github.com/dantmnf/redroid-magisk
-FROM ayasa520/redroid:11.0.0-magisk
+# Используем актуальный образ ReDroid с Magisk и поддержкой ARM-трансляции (NDK)
+FROM abing7k/redroid:a11_magisk_ndk_amd
 
 # Устанавливаем утилиты для скачивания модулей
 RUN apt-get update && apt-get install -y curl unzip && rm -rf /var/lib/apt/lists/*
