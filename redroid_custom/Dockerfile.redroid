@@ -1,9 +1,6 @@
-# Используем актуальный образ ReDroid с Magisk и поддержкой ARM-трансляции (NDK)
+# Используем актуальный образ ReDroid с Magisk и NDK (ARM-транслятор)
 FROM abing7k/redroid:a11_magisk_ndk_amd
 
-# Устанавливаем утилиты для скачивания модулей
-RUN apt-get update && apt-get install -y curl unzip && rm -rf /var/lib/apt/lists/*
-
-# Копируем скрипт инициализации хуков
+# Просто копируем наш скрипт инициализации хуков внутрь Android
+# Утилиты curl и unzip уже есть внутри Android "из коробки"
 COPY setup-hooks.sh /data/setup-hooks.sh
-RUN chmod +x /data/setup-hooks.sh
