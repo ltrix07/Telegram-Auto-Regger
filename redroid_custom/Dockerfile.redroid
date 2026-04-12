@@ -1,0 +1,10 @@
+# Используем базовый образ ReDroid, в который УЖЕ интегрирован Magisk
+# Если хочешь собирать Magisk сам, посмотри репозиторий: https://github.com/dantmnf/redroid-magisk
+FROM ayasa520/redroid:11.0.0-magisk
+
+# Устанавливаем утилиты для скачивания модулей
+RUN apt-get update && apt-get install -y curl unzip && rm -rf /var/lib/apt/lists/*
+
+# Копируем скрипт инициализации хуков
+COPY setup-hooks.sh /data/setup-hooks.sh
+RUN chmod +x /data/setup-hooks.sh

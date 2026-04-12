@@ -1,7 +1,7 @@
 services:
 
   # ─────────────────────────────────────────────────────────────
-  # Сетевой шлюз — tun2socks проксирует трафик Android-контейнера
+  # 1. Сетевой шлюз — tun2socks проксирует трафик Android-контейнера
   # ─────────────────────────────────────────────────────────────
   tun2socks_1:
     image: xjasonlyu/tun2socks:v2.5.1
@@ -26,19 +26,20 @@ services:
       - isolated_net
 
   # ─────────────────────────────────────────────────────────────
-  # Android-эмулятор — ReDroid с уникальными HW-идентификаторами
-  # Сеть: через tun2socks (network_mode: service)
-  # Device profile: задаётся через env (RO_PRODUCT_MODEL и др.)
-  # HW identifiers: генерируются DockerAndroidController.start_container()
+  # 2. Android-эмулятор (Кастомный билд с Magisk)
   # ─────────────────────────────────────────────────────────────
   android_1:
-    image: redroid/redroid:11.0.0-latest
+    # ВАЖНО: Здесь мы используем твою папку для сборки, а не просто скачиваем образ
+    build:
+      context: ./redroid_custom
+      dockerfile: Dockerfile.redroid
     privileged: true
     shm_size: '2gb'
     depends_on:
       tun2socks_1:
         condition: service_healthy
     network_mode: "service:tun2socks_1"
+    # ТВОЙ ПОЛНЫЙ БЛОК КОМАНД:
     command:
       - androidboot.redroid_adbd_root=1
       # --- Display ---
@@ -55,23 +56,39 @@ services:
       - ro.build.tags=${RO_BUILD_TAGS:-release-keys}
       - ro.build.description=${RO_BUILD_DESCRIPTION:-redfin-user 11 RQ3A.211001.001 7641976 release-keys}
       - ro.build.fingerprint=${RO_BUILD_FINGERPRINT:-google/redfin/redfin:11/RQ3A.211001.001/7641976:user/release-keys}
-      # --- Dynamic HW identifiers (генерируются DockerAndroidController) ---
+      # --- Dynamic HW identifiers ---
       - ro.serialno=${DEVICE_SERIAL:-SERIAL}
       - ro.build.id=${DEVICE_BUILD_ID:-BUILD}
-      # --- SIM (соответствует ГЕО прокси, задаётся через get_sim_props_by_operator) ---
+      # --- SIM ---
       - gsm.sim.operator.numeric=${SIM_NUMERIC:-25001}
       - gsm.sim.operator.alpha=${SIM_ALPHA:-MTS}
       - gsm.sim.operator.iso-country=${SIM_ISO:-ru}
       - gsm.operator.numeric=${SIM_NUMERIC:-25001}
       - gsm.operator.alpha=${SIM_ALPHA:-MTS}
       - gsm.operator.iso-country=${SIM_ISO:-ru}
-    # --- ADB Key Passthrough (ro.secure=1 требует pre-authorized ключ) ---
     volumes:
       - ./adb_keys/adbkey.pub:/data/misc/adb/adb_keys:ro
     environment:
       - TZ=${SYS_TIMEZONE:-Europe/Moscow}
       - ro.product.locale=${SYS_LOCALE:-ru-RU}
       - persist.sys.timezone=${SYS_TIMEZONE:-Europe/Moscow}
+
+  # ─────────────────────────────────────────────────────────────
+  # 3. Твой Python Контроллер (Новый блок)
+  # ─────────────────────────────────────────────────────────────
+  controller:
+    build:
+      context: .
+      dockerfile: Dockerfile.controller
+    depends_on:
+      - android_1
+    volumes:
+      - .:/app 
+      - /var/run/docker.sock:/var/run/docker.sock # Дает контроллеру доступ к Докеру хоста
+    environment:
+      - REDROID_IP=android_1 # Хост для подключения по ADB внутри сети isolated_net
+    networks:
+      - isolated_net
 
 networks:
   isolated_net:
